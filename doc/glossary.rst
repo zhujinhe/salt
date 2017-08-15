@@ -1,3 +1,6 @@
+.. _glossary:
+
+========
 Glossary
 ========
 
@@ -73,6 +76,17 @@ Glossary
         The collection of states to be applied to a system. *See also*:
         :ref:`state layers <state-layers-highstate>`.
 
+    Idempotent
+        An action that ensures the system is in a well-known state regardless
+        of the system's state before the action is applied.  A corollary to
+        this is that applying the action multiple times results in no changes
+        to the system.  State module functions should be idempotent.  Some
+        state module functions, such as :mod:`cmd.run <salt.states.cmd.run>`
+        are not idempotent by default but can be made idempotent with the
+        proper use of requisites such as :ref:```unless`` <unless-requisite>`
+        and :ref:```onlyif`` <onlyif-requisite>`.  For more information, *see*
+        `wikipedia <https://en.wikipedia.org/wiki/Idempotent>`_.
+
     Jinja
         A templating language which allows variables and simple logic to be
         dynamically inserted into static text files when they are rendered.
@@ -84,16 +98,22 @@ Glossary
         command are a single job. *See also*: :py:mod:`jobs runner
         <salt.runners.jobs>`.
 
+    Job Cache
+        A storage location for job results, which may then be queried by a 
+        salt runner or an external system. May be local to a salt master
+        or stored externally.
+
     Job ID
-        A unique identifier to represent a given :term:`job`.
+        A unique identifier to represent a given :term:`job`.  This is often
+        shortened to JID.
 
     Low State
         The collection of processed states after requisites and order are
         evaluated. *See also*: :ref:`state layers <state-layers-low-state>`.
 
     Master
-        A central Salt daemon which from which commands can be issued to
-        listening minions.
+        A central Salt daemon from which commands can be issued to listening
+        minions.
 
     Masterless
         A minion which does not require a Salt master to operate. All
@@ -106,7 +126,7 @@ Glossary
     Mine
         A facility to collect arbitrary data from minions and store that data
         on the master. This data is then available to all other minions.
-        [Sometimes referred to as Salt Mine.] *See also*: :ref:`Salt Mine
+        (Sometimes referred to as Salt Mine.) *See also*: :ref:`Salt Mine
         <salt-mine>`.
 
     Minion
@@ -129,10 +149,6 @@ Glossary
     Outputter
         A formatter for defining the characteristics of output data from a Salt
         command. *See also*: :ref:`list of outputters <all-salt.output>`.
-
-    Overstate
-        A system by which a Master can issue function calls to minions in a
-        deterministic order. *See also*: :ref:`overstate <states-overstate>`.
 
     Peer Communication
         The ability for minions to communicate directly with other minions
@@ -182,7 +198,7 @@ Glossary
         of runner modules <all-salt.runners>`.
 
     Runner Function
-        A function which is is called by the :command:`salt-run` command and
+        A function which is called by the :command:`salt-run` command and
         executes on the master instead of on a minion. *See also*:
         :term:`Runner Module`.
 
@@ -251,7 +267,9 @@ Glossary
         whether or not the module should be available to a minion. This
         function commonly contains logic to determine if all requirements
         for a module are available, such as external libraries.
+
     Worker
         A master process which can send notices and receive replies from
         minions. *See also*:
         :conf_master:`worker_threads`.
+

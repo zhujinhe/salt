@@ -2,7 +2,7 @@
 '''
 Support for RallyDev
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.8.0
 
 Requires a ``username`` and a ``password`` in ``/etc/salt/minion``:
 
@@ -30,9 +30,9 @@ def __virtual__():
     Only load the module if apache is installed
     '''
     if not __opts__.get('rallydev', {}).get('username', None):
-        return False
+        return (False, 'The rallydev execution module failed to load: rallydev:username not defined in config.')
     if not __opts__.get('rallydev', {}).get('password', None):
-        return False
+        return (False, 'The rallydev execution module failed to load: rallydev:password not defined in config.')
     return True
 
 
@@ -68,9 +68,7 @@ def _query(action=None,
            header_dict=None,
            data=None):
     '''
-    Make a web call to Stormpath
-
-    .. versionadded:: Beryllium
+    Make a web call to RallyDev.
     '''
     token = _get_token()
     username = __opts__.get('rallydev', {}).get('username', None)

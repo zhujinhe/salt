@@ -8,22 +8,22 @@ http://support.microsoft.com/kb/104011
 '''
 from __future__ import absolute_import
 
-# Python Libs
+# Import Python libs
 import logging
-import re
 import os
-from salt.ext.six.moves import map
+import re
 
-# Third party libs
+# Import Salt libs
+import salt.utils.platform
+
+# Import 3rd-party libs
+from salt.ext.six.moves import map
 try:
-    import win32gui
-    import win32con
+    from win32con import HWND_BROADCAST, WM_SETTINGCHANGE
+    from win32api import SendMessage
     HAS_WIN32 = True
 except ImportError:
     HAS_WIN32 = False
-
-# Import salt libs
-import salt.utils
 
 # Settings
 log = logging.getLogger(__name__)
@@ -33,9 +33,9 @@ def __virtual__():
     '''
     Load only on Windows
     '''
-    if salt.utils.is_windows() and HAS_WIN32:
+    if salt.utils.platform.is_windows() and HAS_WIN32:
         return 'win_path'
-    return False
+    return (False, "Module win_path: module only works on Windows systems")
 
 
 def _normalize_dir(string):
@@ -47,16 +47,30 @@ def _normalize_dir(string):
 
 def rehash():
     '''
-    Send a WM_SETTINGCHANGE Broadcast to Windows to rehash the Environment variables
+    Send a WM_SETTINGCHANGE Broadcast to Windows to refresh the Environment variables
+
+    CLI Example:
+
+    ... code-block:: bash
+
+        salt '*' win_path.rehash
     '''
-    return win32gui.SendMessageTimeout(win32con.HWND_BROADCAST, win32con.WM_SETTINGCHANGE, 0, 'Environment', 0, 10000)[0] == 1
+    return bool(SendMessage(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 'Environment'))
 
 
 def get_path():
     '''
-    Returns the system path
+    Returns a list of items in the SYSTEM path
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' win_path.get_path
     '''
-    ret = __salt__['reg.read_key']('HKEY_LOCAL_MACHINE', 'SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', 'PATH').split(';')
+    ret = __salt__['reg.read_value']('HKEY_LOCAL_MACHINE',
+                                   'SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+                                   'PATH')['vdata'].split(';')
 
     # Trim ending backslash
     return list(map(_normalize_dir, ret))
@@ -66,6 +80,9 @@ def exists(path):
     '''
     Check if the directory is configured in the SYSTEM path
     Case-insensitive and ignores trailing backslash
+
+    Returns:
+        boolean True if path exists, False if not
 
     CLI Example:
 
@@ -84,6 +101,9 @@ def exists(path):
 def add(path, index=0):
     '''
     Add the directory to the SYSTEM path in the index location
+
+    Returns:
+        boolean True if successful, False if unsuccessful
 
     CLI Example:
 
@@ -123,13 +143,13 @@ def add(path, index=0):
 
     # Add it to the Path
     sysPath.insert(index, path)
-    regedit = __salt__['reg.set_key'](
+    regedit = __salt__['reg.set_value'](
         'HKEY_LOCAL_MACHINE',
         'SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
         'PATH',
         ';'.join(sysPath),
         'REG_EXPAND_SZ'
-        )
+    )
 
     # Broadcast WM_SETTINGCHANGE to Windows
     if regedit:
@@ -139,8 +159,18 @@ def add(path, index=0):
 
 
 def remove(path):
-    '''
+    r'''
     Remove the directory from the SYSTEM path
+
+    Returns:
+        boolean True if successful, False if unsuccessful
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        # Will remove C:\Python27 from the path
+        salt '*' win_path.remove 'c:\\python27'
     '''
     path = _normalize_dir(path)
     sysPath = get_path()
@@ -155,7 +185,7 @@ def remove(path):
     except ValueError:
         return True
 
-    regedit = __salt__['reg.set_key'](
+    regedit = __salt__['reg.set_value'](
         'HKEY_LOCAL_MACHINE',
         'SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
         'PATH',

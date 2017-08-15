@@ -23,10 +23,10 @@ from __future__ import absolute_import
 import logging
 
 # Import salt libs
-import salt.utils
+import salt.utils.path
 
 # Import 3rd-party libs
-import salt.ext.six as six
+from salt.ext import six
 
 # Set up logger
 log = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def __virtual__():
     '''
     if __grains__['kernel'] != 'Linux':
         return False
-    if not salt.utils.which('mdadm'):
+    if not salt.utils.path.which('mdadm'):
         return False
     return __virtualname__
 
@@ -63,6 +63,9 @@ def present(name,
 
     devices
         A list of devices used to build the array.
+
+    kwargs
+        Optional arguments to be passed to mdadm.
 
     Example:
 

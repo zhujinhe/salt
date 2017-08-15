@@ -17,7 +17,7 @@ from yaml.constructor import ConstructorError
 from yaml.scanner import ScannerError
 
 from salt.serializers import DeserializationError, SerializationError
-import salt.ext.six as six
+from salt.ext import six
 from salt.utils.odict import OrderedDict
 
 __all__ = ['deserialize', 'serialize', 'available']
@@ -35,14 +35,14 @@ ERROR_MAP = {
 
 
 def deserialize(stream_or_string, **options):
-    """
+    '''
     Deserialize any string of stream like object into a Python data structure.
 
     :param stream_or_string: stream or string to deserialize.
     :param options: options given to lower yaml module.
-    """
+    '''
 
-    options.setdefault('Loader', BaseLoader)
+    options.setdefault('Loader', Loader)
     try:
         return yaml.load(stream_or_string, **options)
     except ScannerError as error:
@@ -58,12 +58,12 @@ def deserialize(stream_or_string, **options):
 
 
 def serialize(obj, **options):
-    """
+    '''
     Serialize Python data to YAML.
 
     :param obj: the data structure to serialize
     :param options: options given to lower yaml module.
-    """
+    '''
 
     options.setdefault('Dumper', Dumper)
     try:
@@ -78,7 +78,7 @@ def serialize(obj, **options):
 
 
 class Loader(BaseLoader):  # pylint: disable=W0232
-    """Overwrites Loader as not for pollute legacy Loader"""
+    '''Overwrites Loader as not for pollute legacy Loader'''
     pass
 
 Loader.add_multi_constructor('tag:yaml.org,2002:null', Loader.construct_yaml_null)
@@ -97,15 +97,16 @@ Loader.add_multi_constructor(None, Loader.construct_undefined)
 
 
 class Dumper(BaseDumper):  # pylint: disable=W0232
-    """Overwrites Dumper as not for pollute legacy Dumper"""
+    '''Overwrites Dumper as not for pollute legacy Dumper'''
     pass
 
 Dumper.add_multi_representer(type(None), Dumper.represent_none)
 Dumper.add_multi_representer(str, Dumper.represent_str)
-Dumper.add_multi_representer(six.text_type, Dumper.represent_unicode)
+if six.PY2:
+    Dumper.add_multi_representer(six.text_type, Dumper.represent_unicode)
+    Dumper.add_multi_representer(int, Dumper.represent_long)
 Dumper.add_multi_representer(bool, Dumper.represent_bool)
 Dumper.add_multi_representer(int, Dumper.represent_int)
-Dumper.add_multi_representer(int, Dumper.represent_long)
 Dumper.add_multi_representer(float, Dumper.represent_float)
 Dumper.add_multi_representer(list, Dumper.represent_list)
 Dumper.add_multi_representer(tuple, Dumper.represent_list)

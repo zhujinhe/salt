@@ -2,10 +2,10 @@
 '''
 Connection module for Amazon Cloud Formation
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.5.0
 
 :configuration: This module accepts explicit AWS credentials but can also utilize
-    IAM roles assigned to the instance trough Instance Profiles. Dynamic
+    IAM roles assigned to the instance through Instance Profiles. Dynamic
     credentials are then automatically obtained from AWS API and no further
     configuration is necessary. More Information available at:
 
@@ -58,20 +58,18 @@ def __virtual__():
     Only load if boto libraries exist.
     '''
     if not HAS_BOTO:
-        return False
+        return (False, 'The module boto_cfs could not be loaded: boto libraries not found')
     return True
 
 
 def __init__(opts):
     if HAS_BOTO:
-        __utils__['boto.assign_funcs'](__name__, 'cfn', module='cloudformation')
+        __utils__['boto.assign_funcs'](__name__, 'cfn', module='cloudformation', pack=__salt__)
 
 
 def exists(name, region=None, key=None, keyid=None, profile=None):
     '''
     Check to see if a stack exists.
-
-    .. versionadded:: Beryllium
 
     CLI example::
 
@@ -93,7 +91,7 @@ def describe(name, region=None, key=None, keyid=None, profile=None):
     '''
     Describe a stack.
 
-    .. versionadded:: Beryllium
+    .. versionadded:: 2015.8.0
 
     CLI example::
 
@@ -107,14 +105,19 @@ def describe(name, region=None, key=None, keyid=None, profile=None):
         if r:
             stack = r[0]
             log.debug('Found VPC: {0}'.format(stack.stack_id))
-            keys = ('stack_id', 'description', 'stack_status', 'stack_status_reason')
+            keys = ('stack_id', 'description', 'stack_status', 'stack_status_reason', 'tags')
 
-            ret = dict([(k, getattr(stack, k)) for k in keys])
+            ret = dict([(k, getattr(stack, k)) for k in keys if hasattr(stack, k)])
             o = getattr(stack, 'outputs')
+            p = getattr(stack, 'parameters')
             outputs = {}
+            parameters = {}
             for i in o:
                 outputs[i.key] = i.value
             ret['outputs'] = outputs
+            for j in p:
+                parameters[j.key] = j.value
+            ret['parameters'] = parameters
 
             return {'stack': ret}
 
@@ -130,8 +133,6 @@ def create(name, template_body=None, template_url=None, parameters=None, notific
            stack_policy_url=None, region=None, key=None, keyid=None, profile=None):
     '''
     Create a CFN stack.
-
-    .. versionadded:: Beryllium
 
     CLI example to create a stack::
 
@@ -157,7 +158,7 @@ def update_stack(name, template_body=None, template_url=None, parameters=None, n
     '''
     Update a CFN stack.
 
-    .. versionadded:: Beryllium
+    .. versionadded:: 2015.8.0
 
     CLI example to update a stack::
 
@@ -184,8 +185,6 @@ def delete(name, region=None, key=None, keyid=None, profile=None):
     '''
     Delete a CFN stack.
 
-    .. versionadded:: Beryllium
-
     CLI example to delete a stack::
 
         salt myminion boto_cfn.delete mystack region=us-east-1
@@ -204,8 +203,6 @@ def delete(name, region=None, key=None, keyid=None, profile=None):
 def get_template(name, region=None, key=None, keyid=None, profile=None):
     '''
     Check to see if attributes are set on a CFN stack.
-
-    .. versionadded:: Beryllium
 
     CLI example::
 
@@ -228,7 +225,7 @@ def validate_template(template_body=None, template_url=None, region=None, key=No
     '''
     Validate cloudformation template
 
-    .. versionadded:: Beryllium
+    .. versionadded:: 2015.8.0
 
     CLI example::
 

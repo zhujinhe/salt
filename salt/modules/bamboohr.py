@@ -2,7 +2,7 @@
 '''
 Support for BambooHR
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.8.0
 
 Requires a ``subdomain`` and an ``apikey`` in ``/etc/salt/minion``:
 
@@ -20,7 +20,7 @@ import logging
 
 # Import salt libs
 import salt.utils.http
-import salt.ext.six as six
+from salt.ext import six
 from salt._compat import ElementTree as ET
 
 log = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def __virtual__():
     '''
     if _apikey():
         return True
-    return False
+    return (False, 'The API key was not specified. Please specify it using the "apikey" config.')
 
 
 def _apikey():
@@ -170,7 +170,7 @@ def update_employee(emp_id, key=None, value=None, items=None):
         items = yaml.safe_load(items)
 
     xml_items = ''
-    for pair in items.keys():
+    for pair in items:
         xml_items += '<field id="{0}">{1}</field>'.format(pair, items[pair])
     xml_items = '<employee>{0}</employee>'.format(xml_items)
 

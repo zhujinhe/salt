@@ -12,7 +12,8 @@ import sys
 import errno
 import time
 import random
-import salt.ext.six as six
+import shutil
+from salt.ext import six
 
 
 CAN_RENAME_OPEN_FILE = False
@@ -117,6 +118,8 @@ class _AtomicWFile(object):
         if self._fh.closed:
             return
         self._fh.close()
+        if os.path.isfile(self._filename):
+            shutil.copymode(self._filename, self._tmp_filename)
         atomic_rename(self._tmp_filename, self._filename)
 
     def __exit__(self, exc_type, exc_value, traceback):

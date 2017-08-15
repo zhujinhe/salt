@@ -1,303 +1,288 @@
 # -*- coding: utf-8 -*-
-"""
+'''
 Module for managing Windows Updates using the Windows Update Agent.
+
+List updates on the system using the following functions:
+
+- :ref:`available`
+- :ref:`list`
+
+This is an easy way to find additional information about updates available to
+to the system, such as the GUID, KB number, or description.
+
+Once you have the GUID or a KB number for the update you can get information
+about the update, download, install, or uninstall it using these functions:
+
+- :ref:`get`
+- :ref:`download`
+- :ref:`install`
+- :ref:`uninstall`
+
+The get function expects a name in the form of a GUID, KB, or Title and should
+return information about a single update. The other functions accept either a
+single item or a list of items for downloading/installing/uninstalling a
+specific list of items.
+
+The :ref:`list` and :ref:`get` functions are utility functions. In addition to
+returning information about updates they can also download and install updates
+by setting ``download=True`` or ``install=True``. So, with :ref:`list` for
+example, you could run the function with the filters you want to see what is
+available. Then just add ``install=True`` to install everything on that list.
+
+If you want to download, install, or uninstall specific updates, use
+:ref:`download`, :ref:`install`, or :ref:`uninstall`. To update your system
+with the latest updates use :ref:`list` and set ``install=True``
+
+You can also adjust the Windows Update settings using the :ref:`set_wu_settings`
+function. This function is only supported on the following operating systems:
+
+- Windows Vista / Server 2008
+- Windows 7 / Server 2008R2
+- Windows 8 / Server 2012
+- Windows 8.1 / Server 2012R2
+
+As of Windows 10 and Windows Server 2016, the ability to modify the Windows
+Update settings has been restricted. The settings can be modified in the Local
+Group Policy using the ``lgpo`` module.
 
 .. versionadded:: 2015.8.0
 
 :depends:
-        - win32com
-        - pythoncom
-"""
-from __future__ import absolute_import
-from salt.ext.six.moves import range  # pylint: disable=no-name-in-module,redefined-builtin
-
+        - salt.utils.win_update
+'''
 # Import Python libs
+from __future__ import absolute_import
+from __future__ import unicode_literals
 import logging
 
-# Import 3rd-party libs
-try:
-    import win32com.client
-    import pythoncom
-
-    HAS_DEPENDENCIES = True
-except ImportError:
-    HAS_DEPENDENCIES = False
-
-# Import salt libs
+# Import Salt libs
 import salt.utils
+import salt.utils.platform
+import salt.utils.win_update
+from salt.exceptions import CommandExecutionError
+
+# Import 3rd-party libs
+from salt.ext import six
+try:
+    import pythoncom
+    import win32com.client
+    HAS_PYWIN32 = True
+except ImportError:
+    HAS_PYWIN32 = False
 
 log = logging.getLogger(__name__)
 
 
 def __virtual__():
-    """
-    Only works on Windows systems
-    """
-    if salt.utils.is_windows() and HAS_DEPENDENCIES:
-        return True
-    return False
+    '''
+    Only works on Windows systems with PyWin32
+    '''
+    if not salt.utils.platform.is_windows():
+        return False, 'WUA: Only available on Window systems'
+
+    if not HAS_PYWIN32:
+        return False, 'WUA: Requires PyWin32 libraries'
+
+    if not salt.utils.win_update.HAS_PYWIN32:
+        return False, 'WUA: Missing Libraries required by salt.utils.win_update'
+
+    return True
 
 
-def _wua_search(skip_hidden=True,
-                skip_installed=True,
-                skip_present=False,
-                skip_reboot=False,
-                software_updates=True,
-                driver_updates=True):
-    # Build the search string
-    search_string = ''
-    search_params = []
+def available(software=True,
+              drivers=True,
+              summary=False,
+              skip_installed=True,
+              skip_hidden=True,
+              skip_mandatory=False,
+              skip_reboot=False,
+              categories=None,
+              severities=None,):
+    '''
+    .. versionadded:: 2017.7.0
 
-    if skip_hidden:
-        search_params.append('IsHidden=0')
+    List updates that match the passed criteria. This allows for more filter
+    options than :func:`list`. Good for finding a specific GUID or KB.
 
-    if skip_installed:
-        search_params.append('IsInstalled=0')
+    Args:
 
-    if skip_present:
-        search_params.append('IsPresent=0')
+        software (bool):
+            Include software updates in the results (default is True)
 
-    if skip_reboot:
-        search_params.append('RebootRequired=0')
+        drivers (bool):
+            Include driver updates in the results (default is False)
 
-    for i in search_params:
-        search_string += '{0} and '.format(i)
+        summary (bool):
+            - True: Return a summary of updates available for each category.
+            - False (default): Return a detailed list of available updates.
 
-    if software_updates and driver_updates:
-        search_string += 'Type=\'Software\' or Type=\'Driver\''
-    elif software_updates:
-        search_string += 'Type=\'Software\''
-    elif driver_updates:
-        search_string += 'Type=\'Driver\''
-    else:
-        log.debug('Neither Software nor Drivers included in search. Results will be empty.')
-        return False
+        skip_installed (bool):
+            Skip updates that are already installed. Default is False.
 
-    # Initialize the PyCom system
-    pythoncom.CoInitialize()
+        skip_hidden (bool):
+            Skip updates that have been hidden. Default is True.
 
-    # Create a session with the Windows Update Agent
-    wua_session = win32com.client.Dispatch('Microsoft.Update.Session')
+        skip_mandatory (bool):
+            Skip mandatory updates. Default is False.
 
-    # Create a searcher object
-    wua_searcher = wua_session.CreateUpdateSearcher()
+        skip_reboot (bool):
+            Skip updates that require a reboot. Default is False.
 
-    # Search for updates
-    try:
-        log.debug('Searching for updates: {0}'.format(search_string))
-        results = wua_searcher.Search(search_string)
-        log.debug('Search completed successfully')
-        return results.Updates
-    except Exception as exc:
-        log.info('Search for updates failed. {0}'.format(exc))
-        return exc
+        categories (list):
+            Specify the categories to list. Must be passed as a list. All
+            categories returned by default.
 
+            Categories include the following:
 
-def _filter_list_by_category(updates, categories=None):
-    # This function filters the updates list based on Category
+            * Critical Updates
+            * Definition Updates
+            * Drivers (make sure you set drivers=True)
+            * Feature Packs
+            * Security Updates
+            * Update Rollups
+            * Updates
+            * Update Rollups
+            * Windows 7
+            * Windows 8.1
+            * Windows 8.1 drivers
+            * Windows 8.1 and later drivers
+            * Windows Defender
 
-    if not updates:
-        return 'No updates found'
+        severities (list):
+            Specify the severities to include. Must be passed as a list. All
+            severities returned by default.
 
-    update_list = win32com.client.Dispatch('Microsoft.Update.UpdateColl')
+            Severities include the following:
 
-    for update in updates:
+            * Critical
+            * Important
 
-        category_match = False
+    Returns:
 
-        # If no categories were passed, return all categories
-        # Set categoryMatch to True
-        if categories is None:
-            category_match = True
-        else:
-            # Loop through each category found in the update
-            for category in update.Categories:
-                # If the update category exists in the list of categories
-                # passed, then set categoryMatch to True
-                if category.Name in categories:
-                    category_match = True
+        dict: Returns a dict containing either a summary or a list of updates:
 
-        if category_match:
-            update_list.Add(update)
+        .. code-block:: cfg
 
-    return update_list
+            List of Updates:
+            {'<GUID>': {'Title': <title>,
+                        'KB': <KB>,
+                        'GUID': <the globally unique identifier for the update>
+                        'Description': <description>,
+                        'Downloaded': <has the update been downloaded>,
+                        'Installed': <has the update been installed>,
+                        'Mandatory': <is the update mandatory>,
+                        'UserInput': <is user input required>,
+                        'EULAAccepted': <has the EULA been accepted>,
+                        'Severity': <update severity>,
+                        'NeedsReboot': <is the update installed and awaiting reboot>,
+                        'RebootBehavior': <will the update require a reboot>,
+                        'Categories': [ '<category 1>',
+                                        '<category 2>',
+                                        ...]
+                        }
+            }
 
+            Summary of Updates:
+            {'Total': <total number of updates returned>,
+             'Available': <updates that are not downloaded or installed>,
+             'Downloaded': <updates that are downloaded but not installed>,
+             'Installed': <updates installed (usually 0 unless installed=True)>,
+             'Categories': { <category 1>: <total for that category>,
+                             <category 2>: <total for category 2>,
+                             ... }
+            }
 
-def _filter_list_by_severity(updates, severities=None):
-    # This function filters the updates list based on Category
+    CLI Examples:
 
-    if not updates:
-        return 'No updates found'
+    .. code-block:: bash
 
-    update_list = win32com.client.Dispatch('Microsoft.Update.UpdateColl')
+        # Normal Usage (list all software updates)
+        salt '*' win_wua.available
 
-    for update in updates:
+        # List all updates with categories of Critical Updates and Drivers
+        salt '*' win_wua.available categories=["Critical Updates","Drivers"]
 
-        severity_match = False
+        # List all Critical Security Updates
+        salt '*' win_wua.available categories=["Security Updates"] severities=["Critical"]
 
-        # If no severities were passed, return all categories
-        # Set severity_match to True
-        if severities is None:
-            severity_match = True
-        else:
-            # If the severity exists in the list of severities passed, then set
-            # severity_match to True
-            if update.MsrcSeverity in severities:
-                severity_match = True
+        # List all updates with a severity of Critical
+        salt '*' win_wua.available severities=["Critical"]
 
-        if severity_match:
-            update_list.Add(update)
+        # A summary of all available updates
+        salt '*' win_wua.available summary=True
 
-    return update_list
+        # A summary of all Feature Packs and Windows 8.1 Updates
+        salt '*' win_wua.available categories=["Feature Packs","Windows 8.1"] summary=True
+    '''
 
+    # Create a Windows Update Agent instance
+    wua = salt.utils.win_update.WindowsUpdateAgent()
 
-def _list_updates_build_summary(updates):
-    if updates.Count == 0:
-        return 'Nothing to return'
+    # Look for available
+    updates = wua.available(
+        skip_hidden=skip_hidden, skip_installed=skip_installed,
+        skip_mandatory=skip_mandatory, skip_reboot=skip_reboot,
+        software=software, drivers=drivers, categories=categories,
+        severities=severities)
 
-    results = {}
-
-    log.debug('Building update summary')
-
-    # Build a dictionary containing a summary of updates available
-    results['Total'] = 0
-    results['Available'] = 0
-    results['Downloaded'] = 0
-    results['Installed'] = 0
-    results['Categories'] = {}
-    results['Severity'] = {}
-
-    for update in updates:
-
-        # Count the total number of updates available
-        results['Total'] += 1
-
-        # Updates available for download
-        if not update.IsDownloaded and not update.IsInstalled:
-            results['Available'] += 1
-
-        # Updates downloaded awaiting install
-        if update.IsDownloaded and not update.IsInstalled:
-            results['Downloaded'] += 1
-
-        # Updates installed
-        if update.IsInstalled:
-            results['Installed'] += 1
-
-        # Add Categories and increment total for each one
-        # The sum will be more than the total because each update can have
-        # multiple categories
-        for category in update.Categories:
-            if category.Name in results['Categories']:
-                results['Categories'][category.Name] += 1
-            else:
-                results['Categories'][category.Name] = 1
-
-        # Add Severity Summary
-        if update.MsrcSeverity:
-            if update.MsrcSeverity in results['Severity']:
-                results['Severity'][update.MsrcSeverity] += 1
-            else:
-                results['Severity'][update.MsrcSeverity] = 1
-
-    return results
+    # Return results as Summary or Details
+    return updates.summary() if summary else updates.list()
 
 
-def _list_updates_build_report(updates):
-    if updates.Count == 0:
-        return 'Nothing to return'
+def list_update(name, download=False, install=False):
+    '''
+    .. deprecated:: 2017.7.0
+       Use :func:`get` instead
 
-    results = {}
-
-    log.debug('Building a detailed report of the results.')
-
-    # Build a dictionary containing details for each update
-
-    for update in updates:
-
-        guid = update.Identity.UpdateID
-        results[guid] = {}
-        results[guid]['guid'] = guid
-        title = update.Title
-        results[guid]['Title'] = title
-        kb = ""
-        if "KB" in title:
-            kb = title[title.find("(") + 1: title.find(")")]
-        results[guid]['KB'] = kb
-        results[guid]['Description'] = update.Description
-        results[guid]['Downloaded'] = str(update.IsDownloaded)
-        results[guid]['Installed'] = str(update.IsInstalled)
-        results[guid]['Mandatory'] = str(update.IsMandatory)
-        results[guid]['UserInput'] = str(update.InstallationBehavior.CanRequestUserInput)
-        results[guid]['EULAAccepted'] = str(update.EulaAccepted)
-
-        # Severity of the Update
-        # Can be: Critical, Important, Low, Moderate, <unspecified or empty>
-        results[guid]['Severity'] = str(update.MsrcSeverity)
-
-        # This value could easily be confused with the Reboot Behavior value
-        # This is stating whether or not the INSTALLED update is awaiting
-        # reboot
-        results[guid]['NeedsReboot'] = str(update.RebootRequired)
-
-        # Interpret the RebootBehavior value
-        # This value is referencing an update that has NOT been installed
-        rb = {0: 'Never Requires Reboot',
-              1: 'Always Requires Reboot',
-              2: 'Can Require Reboot'}
-        results[guid]['RebootBehavior'] = rb[update.InstallationBehavior.RebootBehavior]
-
-        # Add categories (nested list)
-        results[guid]['Categories'] = []
-        for category in update.Categories:
-            results[guid]['Categories'].append(category.Name)
-
-    return results
-
-
-def list_update(name=None,
-                download=False,
-                install=False):
-    """
     Returns details for all updates that match the search criteria
 
-    name
-    The name of the update you're searching for. This can be the GUID
-    (preferred), a KB number, or the full name of the update. Run list_updates
-    to get the GUID for the update you're looking for.
+    Args:
 
-    download
-        Download the update returned by this function. Run this function first
-        to see if the update exists, then set download=True to download the
-        update.
+        name (str):
+            The name of the update you're searching for. This can be the GUID, a
+            KB number, or any part of the name of the update. GUIDs and KBs are
+            preferred. Run ``list_updates`` to get the GUID for the update
+            you're looking for.
 
-    install
-        Install the update returned by this function. Run this function first
-        to see if the update exists, then set install=True to install the
-        update. This will override download=True
+        download (bool):
+            Download the update returned by this function. Run this function
+            first to see if the update exists, then set ``download=True`` to
+            download the update.
 
-    Returns a dict containing either a list of updates that match the name if
-    download and install are both set to False. Should usually be a single
-    update, but can return multiple if a partial name is given::
+        install (bool):
+            Install the update returned by this function. Run this function
+            first to see if the update exists, then set ``install=True`` to
+            install the update.
 
-        List of Updates:
-        {'<GUID>': {'Title': <title>,
-                    'KB': <KB>,
-                    'GUID': <the globally uinique identifier for the update>
-                    'Description': <description>,
-                    'Downloaded': <has the update been downloaded>,
-                    'Installed': <has the update been installed>,
-                    'Mandatory': <is the update mandatory>,
-                    'UserInput': <is user input required>,
-                    'EULAAccepted': <has the EULA been accepted>,
-                    'Severity': <update severity>,
-                    'NeedsReboot': <is the update installed and awaiting reboot>,
-                    'RebootBehavior': <will the update require a reboot>,
-                    'Categories': [ '<category 1>',
-                                    '<category 2>',
-                                    ...]
-                    }
-        }
+    Returns:
+
+        dict: Returns a dict containing a list of updates that match the name if
+        download and install are both set to False. Should usually be a single
+        update, but can return multiple if a partial name is given.
+
+        If download or install is set to true it will return the results of the
+        operation.
+
+        .. code-block:: cfg
+
+            List of Updates:
+            {'<GUID>': {'Title': <title>,
+                        'KB': <KB>,
+                        'GUID': <the globally unique identifier for the update>
+                        'Description': <description>,
+                        'Downloaded': <has the update been downloaded>,
+                        'Installed': <has the update been installed>,
+                        'Mandatory': <is the update mandatory>,
+                        'UserInput': <is user input required>,
+                        'EULAAccepted': <has the EULA been accepted>,
+                        'Severity': <update severity>,
+                        'NeedsReboot': <is the update installed and awaiting reboot>,
+                        'RebootBehavior': <will the update require a reboot>,
+                        'Categories': [ '<category 1>',
+                                        '<category 2>',
+                                        ...]
+                        }
+            }
 
     CLI Examples:
 
@@ -305,239 +290,425 @@ def list_update(name=None,
 
         # Recommended Usage using GUID without braces
         # Use this to find the status of a specific update
-        salt '*' wua.list_update 12345678-abcd-1234-abcd-1234567890ab
+        salt '*' win_wua.list_update 12345678-abcd-1234-abcd-1234567890ab
 
         # Use the following if you don't know the GUID:
 
         # Using a KB number (could possibly return multiple results)
         # Not all updates have an associated KB
-        salt '*' wua.list_update KB3030298
+        salt '*' win_wua.list_update KB3030298
 
         # Using part or all of the name of the update
         # Could possibly return multiple results
         # Not all updates have an associated KB
-        salt '*' wua.list_update 'Microsoft Camera Codec Pack'
+        salt '*' win_wua.list_update 'Microsoft Camera Codec Pack'
+    '''
+    salt.utils.warn_until(
+        'Fluorine',
+        'This function is replaced by \'get\' as of Salt 2017.7.0. This'
+        'warning will be removed in Salt Fluorine.')
+    return get(name, download, install)
 
-    """
-    if name is None:
-        return 'Nothing to list'
 
-    # Initialize the PyCom system
-    pythoncom.CoInitialize()
+def get(name, download=False, install=False):
+    '''
+    .. versionadded:: 2017.7.0
 
-    # Create a session with the Windows Update Agent
-    wua_session = win32com.client.Dispatch('Microsoft.Update.Session')
+    Returns details for the named update
 
-    # Create the searcher
-    wua_searcher = wua_session.CreateUpdateSearcher()
+    Args:
 
-    # Create the found update collection
-    wua_found = win32com.client.Dispatch('Microsoft.Update.UpdateColl')
+        name (str):
+            The name of the update you're searching for. This can be the GUID, a
+            KB number, or any part of the name of the update. GUIDs and KBs are
+            preferred. Run ``list`` to get the GUID for the update you're
+            looking for.
 
-    # Try searching for the GUID first
-    search_string = 'UpdateID=\'{0}\''.format(name)
+        download (bool):
+            Download the update returned by this function. Run this function
+            first to see if the update exists, then set ``download=True`` to
+            download the update.
 
-    log.debug('Searching for update: {0}'.format(search_string.lower()))
-    try:
-        found_using_guid = False
-        wua_search_result = wua_searcher.Search(search_string.lower())
-        if wua_search_result.Updates.Count > 0:
-            found_using_guid = True
-        else:
-            return "No update found"
-    except Exception:
-        log.debug('GUID not found, searching Title: {0}'.format(name))
-        search_string = 'Type=\'Software\' or Type=\'Driver\''
-        wua_search_result = wua_searcher.Search(search_string)
+        install (bool):
+            Install the update returned by this function. Run this function
+            first to see if the update exists, then set ``install=True`` to
+            install the update.
 
-    # Populate wua_found
-    if found_using_guid:
-        # Found using GUID so there should only be one
-        # Add it to the collection
-        for update in wua_search_result.Updates:
-            wua_found.Add(update)
-    else:
-        # Not found using GUID
-        # Try searching the title for the Name or KB
-        for update in wua_search_result.Updates:
-            if name in update.Title:
-                wua_found.Add(update)
+    Returns:
 
+        dict: Returns a dict containing a list of updates that match the name if
+        download and install are both set to False. Should usually be a single
+        update, but can return multiple if a partial name is given.
+
+        If download or install is set to true it will return the results of the
+        operation.
+
+        .. code-block:: cfg
+
+            List of Updates:
+            {'<GUID>': {'Title': <title>,
+                        'KB': <KB>,
+                        'GUID': <the globally unique identifier for the update>
+                        'Description': <description>,
+                        'Downloaded': <has the update been downloaded>,
+                        'Installed': <has the update been installed>,
+                        'Mandatory': <is the update mandatory>,
+                        'UserInput': <is user input required>,
+                        'EULAAccepted': <has the EULA been accepted>,
+                        'Severity': <update severity>,
+                        'NeedsReboot': <is the update installed and awaiting reboot>,
+                        'RebootBehavior': <will the update require a reboot>,
+                        'Categories': [ '<category 1>',
+                                        '<category 2>',
+                                        ...]
+                        }
+            }
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        # Recommended Usage using GUID without braces
+        # Use this to find the status of a specific update
+        salt '*' win_wua.get 12345678-abcd-1234-abcd-1234567890ab
+
+        # Use the following if you don't know the GUID:
+
+        # Using a KB number
+        # Not all updates have an associated KB
+        salt '*' win_wua.get KB3030298
+
+        # Using part or all of the name of the update
+        # Could possibly return multiple results
+        # Not all updates have an associated KB
+        salt '*' win_wua.get 'Microsoft Camera Codec Pack'
+    '''
+    # Create a Windows Update Agent instance
+    wua = salt.utils.win_update.WindowsUpdateAgent()
+
+    # Search for Update
+    updates = wua.search(name)
+
+    ret = {}
+
+    # Download
+    if download or install:
+        ret['Download'] = wua.download(updates)
+
+    # Install
     if install:
-        guid_list = []
-        for update in wua_found:
-            guid_list.append(update.Identity.UpdateID)
-        return install_updates(guid_list)
+        ret['Install'] = wua.install(updates)
 
-    if download:
-        guid_list = []
-        for update in wua_found:
-            guid_list.append(update.Identity.UpdateID)
-        return download_updates(guid_list)
-
-    return _list_updates_build_report(wua_found)
+    return ret if ret else updates.list()
 
 
 def list_updates(software=True,
                  drivers=False,
                  summary=False,
-                 installed=False,
+                 skip_installed=True,
                  categories=None,
                  severities=None,
                  download=False,
                  install=False):
-    """
-    Returns a detailed list of available updates or a summary
+    '''
+    .. deprecated:: 2017.7.0
+       Use :func:`list` instead
 
-    software
-        Include software updates in the results (default is True)
+    Returns a detailed list of available updates or a summary. If download or
+    install is True the same list will be downloaded and/or installed.
 
-    drivers
-        Include driver updates in the results (default is False)
+    Args:
 
-    summary
-        True: Return a summary of updates available for each category.
-        False (default): Return a detailed list of avialable updates.
+        software (bool):
+            Include software updates in the results (default is True)
 
-    installed
-        Include installed updates in the results (default if False)
+        drivers (bool):
+            Include driver updates in the results (default is False)
 
-    download
-        (Overrides reporting functionality) Download the list of updates
-        returned by this function. Run this function first to see what will be
-        installed, then set download=True to download the updates.
+        summary (bool):
+            - True: Return a summary of updates available for each category.
+            - False (default): Return a detailed list of available updates.
 
-    install
-        (Overrides reporting functionality) Install the list of updates
-        returned by this function. Run this function first to see what will be
-        installed, then set install=True to install the updates. This will
-        override download=True
+        skip_installed (bool):
+            Skip installed updates in the results (default is False)
 
-    categories
-        Specify the categories to list. Must be passed as a list. All
-        categories returned by default.
+        download (bool):
+            (Overrides reporting functionality) Download the list of updates
+            returned by this function. Run this function first with
+            ``download=False`` to see what will be downloaded, then set
+            ``download=True`` to download the updates.
 
-        Categories include the following:
+        install (bool):
+            (Overrides reporting functionality) Install the list of updates
+            returned by this function. Run this function first with
+            ``install=False`` to see what will be installed, then set
+            ``install=True`` to install the updates.
 
-        * Critical Updates
-        * Definition Updates
-        * Drivers (make sure you set drivers=True)
-        * Feature Packs
-        * Security Updates
-        * Update Rollups
-        * Updates
-        * Update Rollups
-        * Windows 7
-        * Windows 8.1
-        * Windows 8.1 drivers
-        * Windows 8.1 and later drivers
-        * Windows Defender
+        categories (list):
+            Specify the categories to list. Must be passed as a list. All
+            categories returned by default.
 
-    severities
-        Specify the severities to include. Must be passed as a list. All
-        severities returned by default.
+            Categories include the following:
 
-        Severities include the following:
+            * Critical Updates
+            * Definition Updates
+            * Drivers (make sure you set drivers=True)
+            * Feature Packs
+            * Security Updates
+            * Update Rollups
+            * Updates
+            * Update Rollups
+            * Windows 7
+            * Windows 8.1
+            * Windows 8.1 drivers
+            * Windows 8.1 and later drivers
+            * Windows Defender
 
-        * Critical
-        * Important
+        severities (list):
+            Specify the severities to include. Must be passed as a list. All
+            severities returned by default.
 
-    Returns a dict containing either a summary or a list of updates::
+            Severities include the following:
 
-        List of Updates:
-        {'<GUID>': {'Title': <title>,
-                    'KB': <KB>,
-                    'GUID': <the globally uinique identifier for the update>
-                    'Description': <description>,
-                    'Downloaded': <has the update been downloaded>,
-                    'Installed': <has the update been installed>,
-                    'Mandatory': <is the update mandatory>,
-                    'UserInput': <is user input required>,
-                    'EULAAccepted': <has the EULA been accepted>,
-                    'Severity': <update severity>,
-                    'NeedsReboot': <is the update installed and awaiting reboot>,
-                    'RebootBehavior': <will the update require a reboot>,
-                    'Categories': [ '<category 1>',
-                                    '<category 2>',
-                                    ...]
-                    }
-        }
+            * Critical
+            * Important
 
-        Summary of Updates:
-        {'Total': <total number of updates returned>,
-         'Available': <updates that are not downloaded or installed>,
-         'Downloaded': <updates that are downloaded but not installed>,
-         'Installed': <updates installed (usually 0 unless installed=True)>,
-         'Categories': { <category 1>: <total for that category>,
-                         <category 2>: <total for category 2>,
-                         ... }
-        }
+    Returns:
+
+        dict: Returns a dict containing either a summary or a list of updates:
+
+        .. code-block:: cfg
+
+            List of Updates:
+            {'<GUID>': {'Title': <title>,
+                        'KB': <KB>,
+                        'GUID': <the globally unique identifier for the update>
+                        'Description': <description>,
+                        'Downloaded': <has the update been downloaded>,
+                        'Installed': <has the update been installed>,
+                        'Mandatory': <is the update mandatory>,
+                        'UserInput': <is user input required>,
+                        'EULAAccepted': <has the EULA been accepted>,
+                        'Severity': <update severity>,
+                        'NeedsReboot': <is the update installed and awaiting reboot>,
+                        'RebootBehavior': <will the update require a reboot>,
+                        'Categories': [ '<category 1>',
+                                        '<category 2>',
+                                        ...]
+                        }
+            }
+
+            Summary of Updates:
+            {'Total': <total number of updates returned>,
+             'Available': <updates that are not downloaded or installed>,
+             'Downloaded': <updates that are downloaded but not installed>,
+             'Installed': <updates installed (usually 0 unless installed=True)>,
+             'Categories': { <category 1>: <total for that category>,
+                             <category 2>: <total for category 2>,
+                             ... }
+            }
 
     CLI Examples:
 
     .. code-block:: bash
 
         # Normal Usage (list all software updates)
-        salt '*' wua.list_updates
+        salt '*' win_wua.list_updates
 
         # List all updates with categories of Critical Updates and Drivers
-        salt '*' wua.list_updates categories=['Critical Updates','Drivers']
+        salt '*' win_wua.list_updates categories=['Critical Updates','Drivers']
 
         # List all Critical Security Updates
-        salt '*' wua.list_updates categories=['Security Updates']\
-                severities=['Critical']
+        salt '*' win_wua.list_updates categories=['Security Updates'] severities=['Critical']
 
         # List all updates with a severity of Critical
-        salt '*' wua.list_updates severities=['Critical']
+        salt '*' win_wua.list_updates severities=['Critical']
 
         # A summary of all available updates
-        salt '*' wua.list_updates summary=True
+        salt '*' win_wua.list_updates summary=True
 
         # A summary of all Feature Packs and Windows 8.1 Updates
-        salt '*' wua.list_updates categories=['Feature Packs','Windows 8.1']\
-                summary=True
+        salt '*' win_wua.list_updates categories=['Feature Packs','Windows 8.1'] summary=True
+    '''
+    salt.utils.warn_until(
+        'Fluorine',
+        'This function is replaced by \'list\' as of Salt 2017.7.0. This'
+        'warning will be removed in Salt Fluorine.')
+    return list(software, drivers, summary, skip_installed, categories,
+                severities, download, install)
 
-    """
-    # Get the list of updates
-    updates = _wua_search(software_updates=software,
-                          driver_updates=drivers,
-                          skip_installed=not installed)
 
-    # Filter the list of updates
-    updates = _filter_list_by_category(updates=updates,
-                                       categories=categories)
+def list(software=True,
+         drivers=False,
+         summary=False,
+         skip_installed=True,
+         categories=None,
+         severities=None,
+         download=False,
+         install=False):
+    '''
+    .. versionadded:: 2017.7.0
 
-    updates = _filter_list_by_severity(updates=updates,
-                                       severities=severities)
+    Returns a detailed list of available updates or a summary. If download or
+    install is True the same list will be downloaded and/or installed.
 
-    # If the list is empty after filtering, return a message
-    if not updates:
-        return 'No updates found. Check software and drivers parameters. One must be true.'
+    Args:
 
+        software (bool):
+            Include software updates in the results (default is True)
+
+        drivers (bool):
+            Include driver updates in the results (default is False)
+
+        summary (bool):
+            - True: Return a summary of updates available for each category.
+            - False (default): Return a detailed list of available updates.
+
+        skip_installed (bool):
+            Skip installed updates in the results (default is False)
+
+        download (bool):
+            (Overrides reporting functionality) Download the list of updates
+            returned by this function. Run this function first with
+            ``download=False`` to see what will be downloaded, then set
+            ``download=True`` to download the updates.
+
+        install (bool):
+            (Overrides reporting functionality) Install the list of updates
+            returned by this function. Run this function first with
+            ``install=False`` to see what will be installed, then set
+            ``install=True`` to install the updates.
+
+        categories (list):
+            Specify the categories to list. Must be passed as a list. All
+            categories returned by default.
+
+            Categories include the following:
+
+            * Critical Updates
+            * Definition Updates
+            * Drivers (make sure you set drivers=True)
+            * Feature Packs
+            * Security Updates
+            * Update Rollups
+            * Updates
+            * Update Rollups
+            * Windows 7
+            * Windows 8.1
+            * Windows 8.1 drivers
+            * Windows 8.1 and later drivers
+            * Windows Defender
+
+        severities (list):
+            Specify the severities to include. Must be passed as a list. All
+            severities returned by default.
+
+            Severities include the following:
+
+            * Critical
+            * Important
+
+    Returns:
+
+        dict: Returns a dict containing either a summary or a list of updates:
+
+        .. code-block:: cfg
+
+            List of Updates:
+            {'<GUID>': {'Title': <title>,
+                        'KB': <KB>,
+                        'GUID': <the globally unique identifier for the update>
+                        'Description': <description>,
+                        'Downloaded': <has the update been downloaded>,
+                        'Installed': <has the update been installed>,
+                        'Mandatory': <is the update mandatory>,
+                        'UserInput': <is user input required>,
+                        'EULAAccepted': <has the EULA been accepted>,
+                        'Severity': <update severity>,
+                        'NeedsReboot': <is the update installed and awaiting reboot>,
+                        'RebootBehavior': <will the update require a reboot>,
+                        'Categories': [ '<category 1>',
+                                        '<category 2>',
+                                        ...]
+                        }
+            }
+
+            Summary of Updates:
+            {'Total': <total number of updates returned>,
+             'Available': <updates that are not downloaded or installed>,
+             'Downloaded': <updates that are downloaded but not installed>,
+             'Installed': <updates installed (usually 0 unless installed=True)>,
+             'Categories': { <category 1>: <total for that category>,
+                             <category 2>: <total for category 2>,
+                             ... }
+            }
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        # Normal Usage (list all software updates)
+        salt '*' win_wua.list
+
+        # List all updates with categories of Critical Updates and Drivers
+        salt '*' win_wua.list categories=['Critical Updates','Drivers']
+
+        # List all Critical Security Updates
+        salt '*' win_wua.list categories=['Security Updates'] severities=['Critical']
+
+        # List all updates with a severity of Critical
+        salt '*' win_wua.list severities=['Critical']
+
+        # A summary of all available updates
+        salt '*' win_wua.list summary=True
+
+        # A summary of all Feature Packs and Windows 8.1 Updates
+        salt '*' win_wua.list categories=['Feature Packs','Windows 8.1'] summary=True
+    '''
+    # Create a Windows Update Agent instance
+    wua = salt.utils.win_update.WindowsUpdateAgent()
+
+    # Search for Update
+    updates = wua.available(skip_installed=skip_installed, software=software,
+                            drivers=drivers, categories=categories,
+                            severities=severities)
+
+    ret = {}
+
+    # Download
+    if download or install:
+        ret['Download'] = wua.download(updates)
+
+    # Install
     if install:
-        guid_list = []
-        for update in updates:
-            guid_list.append(update.Identity.UpdateID)
-        return install_updates(guid_list)
+        ret['Install'] = wua.install(updates)
 
-    if download:
-        guid_list = []
-        for update in updates:
-            guid_list.append(update.Identity.UpdateID)
-        return download_updates(guid_list)
+    if not ret:
+        return updates.summary() if summary else updates.list()
 
-    if summary:
-        return _list_updates_build_summary(updates)
-    else:
-        return _list_updates_build_report(updates)
+    return ret
 
 
-def download_update(guid=None):
-    """
-    Downloads a single update
+def download_update(name):
+    '''
+    .. deprecated:: 2017.7.0
+       Use :func:`download` instead
 
-    GUID
-        A GUID for the update to be downloaded
+    Downloads a single update.
+
+    Args:
+
+        name (str):
+            The name of the update to download. This can be a GUID, a KB number,
+            or any part of the name. To ensure a single item is matched the GUID
+            is preferred.
+
+    .. note::
+        If more than one result is returned an error will be raised.
+
+    Returns:
+
+        dict: A dictionary containing the results of the download
 
     CLI Examples:
 
@@ -545,162 +716,119 @@ def download_update(guid=None):
 
         salt '*' win_wua.download_update 12345678-abcd-1234-abcd-1234567890ab
 
-    """
-    return download_updates([guid])
+        salt '*' win_wua.download_update KB12312321
+    '''
+    salt.utils.warn_until(
+        'Fluorine',
+        'This function is replaced by \'download\' as of Salt 2017.7.0. This'
+        'warning will be removed in Salt Fluorine.')
+    return download(name)
 
 
-def download_updates(guid=None):
-    """
-    Downloads updates that match the list of passed GUIDs. It's easier to use
-    this function by using list_updates and setting install=True.
+def download_updates(names):
+    '''
+    .. deprecated:: 2017.7.0
+       Use :func:`download` instead
 
-    GUID
-        A list of GUIDs to be downloaded
+    Downloads updates that match the list of passed identifiers. It's easier to
+    use this function by using list_updates and setting install=True.
+
+    Args:
+
+        names (list):
+            A list of updates to download. This can be any combination of GUIDs,
+            KB numbers, or names. GUIDs or KBs are preferred.
+
+    Returns:
+
+        dict: A dictionary containing the details about the downloaded updates
 
     CLI Examples:
 
     .. code-block:: bash
 
         # Normal Usage
-        salt '*' win_wua.download_updates \
-                guid=['12345678-abcd-1234-abcd-1234567890ab',\
-                      '87654321-dcba-4321-dcba-ba0987654321']
-    """
-    # Check for empty GUID
-    if guid is None:
-        return "No GUID Specified"
-
-    # Initialize the PyCom system
-    pythoncom.CoInitialize()
-
-    # Create a session with the Windows Update Agent
-    wua_session = win32com.client.Dispatch('Microsoft.Update.Session')
-    wua_session.ClientApplicationID = 'Salt: Install Update'
-
-    # Create the Searcher, Downloader, Installer, and Collections
-    wua_searcher = wua_session.CreateUpdateSearcher()
-    wua_download_list = win32com.client.Dispatch('Microsoft.Update.UpdateColl')
-    wua_downloader = wua_session.CreateUpdateDownloader()
-
-    ret = {}
-
-    # Searching for the GUID
-    search_string = ''
-    search_list = ''
-    log.debug('Searching for updates:')
-    for ident in guid:
-        log.debug('{0}'.format(ident))
-        if search_string == '':
-            search_string = 'UpdateID=\'{0}\''.format(ident.lower())
-            search_list = '{0}'.format(ident.lower())
-        else:
-            search_string += ' or UpdateID=\'{0}\''.format(ident.lower())
-            search_list += '\n{0}'.format(ident.lower())
-
-    try:
-        wua_search_result = wua_searcher.Search(search_string)
-        if wua_search_result.Updates.Count == 0:
-            log.debug('No Updates found for:\n\t\t{0}'.format(search_list))
-            ret['Success'] = False
-            ret['Details'] = 'No Updates found: {0}'.format(search_list)
-            return ret
-    except Exception:
-        log.debug('Invalid Search String: {0}'.format(search_string))
-        return 'Invalid Search String: {0}'.format(search_string)
-
-    # List updates found
-    log.debug('Found the following updates:')
-    ret['Updates'] = {}
-    for update in wua_search_result.Updates:
-        # Check to see if the update is already installed
-        ret['Updates'][update.Identity.UpdateID] = {}
-        ret['Updates'][update.Identity.UpdateID]['Title'] = update.Title
-        if update.IsInstalled:
-            log.debug('Already Installed: {0}'.format(update.Identity.UpdateID))
-            log.debug('\tTitle: {0}'.format(update.Title))
-            ret['Updates'][update.Identity.UpdateID]['AlreadyInstalled'] = True
-        # Make sure the EULA has been accepted
-        if not update.EulaAccepted:
-            log.debug('Accepting EULA: {0}'.format(update.Title))
-            update.AcceptEula  # pylint: disable=W0104
-        # Add to the list of updates that need to be downloaded
-        if update.IsDownloaded:
-            log.debug('Already Downloaded: {0}'.format(update.Identity.UpdateID))
-            log.debug('\tTitle: {0}'.format(update.Title))
-            ret['Updates'][update.Identity.UpdateID]['AlreadyDownloaded'] = True
-        else:
-            log.debug('To Be Downloaded: {0}'.format(update.Identity.UpdateID))
-            log.debug('\tTitle: {0}'.format(update.Title))
-            ret['Updates'][update.Identity.UpdateID]['AlreadyDownloaded'] = False
-            wua_download_list.Add(update)
-
-    # Check the download list
-    if wua_download_list.Count == 0:
-        # Not necessarily a failure, perhaps the update has been downloaded
-        log.debug('No updates to download')
-        ret['Success'] = False
-        ret['Message'] = 'No updates to download'
-        return ret
-
-    # Download the updates
-    log.debug('Downloading...')
-    wua_downloader.Updates = wua_download_list
-
-    try:
-        result = wua_downloader.Download()
-
-    except Exception as error:
-
-        ret['Success'] = False
-        ret['Result'] = format(error)
-
-        hr, msg, exc, arg = error.args  # pylint: disable=W0633
-        # Error codes found at the following site:
-        # https://msdn.microsoft.com/en-us/library/windows/desktop/hh968413(v=vs.85).aspx
-        fc = {-2145124316: 'No Updates: 0x80240024',
-              -2145124284: 'Access Denied: 0x8024044'}
-        try:
-            failure_code = fc[exc[5]]
-        except KeyError:
-            failure_code = 'Unknown Failure: {0}'.format(error)
-
-        log.debug('Download Failed: {0}'.format(failure_code))
-        ret['error_msg'] = failure_code
-        ret['location'] = 'Download Section of download_updates'
-        ret['file'] = 'win_wua.py'
-
-        return ret
-
-    log.debug('Download Complete')
-
-    rc = {0: 'Download Not Started',
-          1: 'Download In Progress',
-          2: 'Download Succeeded',
-          3: 'Download Succeeded With Errors',
-          4: 'Download Failed',
-          5: 'Download Aborted'}
-    log.debug(rc[result.ResultCode])
-
-    if result.ResultCode in [2, 3]:
-        ret['Success'] = True
-    else:
-        ret['Success'] = False
-
-    ret['Message'] = rc[result.ResultCode]
-
-    for i in range(wua_download_list.Count):
-        uid = wua_download_list.Item(i).Identity.UpdateID
-        ret['Updates'][uid]['Result'] = rc[result.GetUpdateResult(i).ResultCode]
-
-    return ret
+        salt '*' win_wua.download_updates guid=['12345678-abcd-1234-abcd-1234567890ab', 'KB2131233']
+    '''
+    salt.utils.warn_until(
+        'Fluorine',
+        'This function is replaced by \'download\' as of Salt 2017.7.0. This'
+        'warning will be removed in Salt Fluorine.')
+    return download(names)
 
 
-def install_update(guid=None):
-    """
+def download(names):
+    '''
+    .. versionadded:: 2017.7.0
+
+    Downloads updates that match the list of passed identifiers. It's easier to
+    use this function by using list_updates and setting install=True.
+
+    Args:
+
+        names (str, list):
+            A single update or a list of updates to download. This can be any
+            combination of GUIDs, KB numbers, or names. GUIDs or KBs are
+            preferred.
+
+    .. note::
+        An error will be raised if there are more results than there are items
+        in the names parameter
+
+    Returns:
+
+        dict: A dictionary containing the details about the downloaded updates
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        # Normal Usage
+        salt '*' win_wua.download names=['12345678-abcd-1234-abcd-1234567890ab', 'KB2131233']
+    '''
+    # Create a Windows Update Agent instance
+    wua = salt.utils.win_update.WindowsUpdateAgent()
+
+    # Search for Update
+    updates = wua.search(names)
+
+    if updates.count() == 0:
+        raise CommandExecutionError('No updates found')
+
+    # Make sure it's a list so count comparison is correct
+    if isinstance(names, six.string_types):
+        names = [names]
+
+    if isinstance(names, six.integer_types):
+        names = [str(names)]
+
+    if updates.count() > len(names):
+        raise CommandExecutionError('Multiple updates found, names need to be '
+                                    'more specific')
+
+    return wua.download(updates)
+
+
+def install_update(name):
+    '''
+    .. deprecated:: 2017.7.0
+       Use :func:`install` instead
+
     Installs a single update
 
-    GUID
-        A GUID for the update to be installed
+    Args:
+
+        name (str): The name of the update to install. This can be a GUID, a KB
+        number, or any part of the name. To ensure a single item is matched the
+        GUID is preferred.
+
+    .. note::
+        If no results or more than one result is returned an error will be
+        raised.
+
+    Returns:
+
+        dict: A dictionary containing the results of the install
 
     CLI Examples:
 
@@ -708,200 +836,501 @@ def install_update(guid=None):
 
         salt '*' win_wua.install_update 12345678-abcd-1234-abcd-1234567890ab
 
-    """
-    return install_updates([guid])
+        salt '*' win_wua.install_update KB12312231
+    '''
+    salt.utils.warn_until(
+        'Fluorine',
+        'This function is replaced by \'install\' as of Salt 2017.7.0. This'
+        'warning will be removed in Salt Fluorine.')
+    return install(name)
 
 
-def install_updates(guid=None):
-    """
-    Installs updates that match the passed criteria. It's easier to use this
-    function by using list_updates and setting install=True.
+def install_updates(names):
+    '''
+    .. deprecated:: 2017.7.0
+       Use :func:`install` instead
 
-    GUID
-        A list of GUIDs to be installed
+    Installs updates that match the list of identifiers. It may be easier to use
+    the list_updates function and set install=True.
+
+    Args:
+
+        names (list): A list of updates to install. This can be any combination
+        of GUIDs, KB numbers, or names. GUIDs or KBs are preferred.
+
+    Returns:
+
+        dict: A dictionary containing the details about the installed updates
 
     CLI Examples:
 
     .. code-block:: bash
 
         # Normal Usage
-        salt '*' win_wua.install_updates \
-                guid=['12345678-abcd-1234-abcd-1234567890ab',\
-                      '87654321-dcba-4321-dcba-ba0987654321']
-    """
-    # Check for empty GUID
-    if guid is None:
-        return 'No GUID Specified'
+        salt '*' win_wua.install_updates guid=['12345678-abcd-1234-abcd-1234567890ab', 'KB12323211']
+    '''
+    salt.utils.warn_until(
+        'Fluorine',
+        'This function is replaced by \'install\' as of Salt 2017.7.0. This'
+        'warning will be removed in Salt Fluorine.')
+    return install(names)
+
+
+def install(names):
+    '''
+    .. versionadded:: 2017.7.0
+
+    Installs updates that match the list of identifiers. It may be easier to use
+    the list_updates function and set install=True.
+
+    Args:
+
+        names (str, list):
+            A single update or a list of updates to install. This can be any
+            combination of GUIDs, KB numbers, or names. GUIDs or KBs are
+            preferred.
+
+    .. note::
+        An error will be raised if there are more results than there are items
+        in the names parameter
+
+    Returns:
+
+        dict: A dictionary containing the details about the installed updates
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        # Normal Usage
+        salt '*' win_wua.install KB12323211
+    '''
+    # Create a Windows Update Agent instance
+    wua = salt.utils.win_update.WindowsUpdateAgent()
+
+    # Search for Updates
+    updates = wua.search(names)
+
+    if updates.count() == 0:
+        raise CommandExecutionError('No updates found')
+
+    # Make sure it's a list so count comparison is correct
+    if isinstance(names, six.string_types):
+        names = [names]
+
+    if isinstance(names, six.integer_types):
+        names = [str(names)]
+
+    if updates.count() > len(names):
+        raise CommandExecutionError('Multiple updates found, names need to be '
+                                    'more specific')
+
+    return wua.install(updates)
+
+
+def uninstall(names):
+    '''
+    .. versionadded:: 2017.7.0
+
+    Uninstall updates.
+
+    Args:
+
+        names (str, list):
+            A single update or a list of updates to uninstall. This can be any
+            combination of GUIDs, KB numbers, or names. GUIDs or KBs are
+            preferred.
+
+    Returns:
+
+        dict: A dictionary containing the details about the uninstalled updates
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        # Normal Usage
+        salt '*' win_wua.uninstall KB3121212
+
+        # As a list
+        salt '*' win_wua.uninstall guid=['12345678-abcd-1234-abcd-1234567890ab', 'KB1231231']
+    '''
+    # Create a Windows Update Agent instance
+    wua = salt.utils.win_update.WindowsUpdateAgent()
+
+    # Search for Updates
+    updates = wua.search(names)
+
+    if updates.count() == 0:
+        raise CommandExecutionError('No updates found')
+
+    return wua.uninstall(updates)
+
+
+def set_wu_settings(level=None,
+                    recommended=None,
+                    featured=None,
+                    elevated=None,
+                    msupdate=None,
+                    day=None,
+                    time=None):
+    '''
+    Change Windows Update settings. If no parameters are passed, the current
+    value will be returned.
+
+    Supported:
+        - Windows Vista / Server 2008
+        - Windows 7 / Server 2008R2
+        - Windows 8 / Server 2012
+        - Windows 8.1 / Server 2012R2
+
+    .. note:
+        Microsoft began using the Unified Update Platform (UUP) starting with
+        Windows 10 / Server 2016. The Windows Update settings have changed and
+        the ability to 'Save' Windows Update settings has been removed. Windows
+        Update settings are read-only. See MSDN documentation:
+        https://msdn.microsoft.com/en-us/library/aa385829(v=vs.85).aspx
+
+    Args:
+
+        level (int):
+            Number from 1 to 4 indicating the update level:
+
+            1. Never check for updates
+            2. Check for updates but let me choose whether to download and install them
+            3. Download updates but let me choose whether to install them
+            4. Install updates automatically
+
+        recommended (bool):
+            Boolean value that indicates whether to include optional or
+            recommended updates when a search for updates and installation of
+            updates is performed.
+
+        featured (bool):
+            Boolean value that indicates whether to display notifications for
+            featured updates.
+
+        elevated (bool):
+            Boolean value that indicates whether non-administrators can perform
+            some update-related actions without administrator approval.
+
+        msupdate (bool):
+            Boolean value that indicates whether to turn on Microsoft Update for
+            other Microsoft products
+
+        day (str):
+            Days of the week on which Automatic Updates installs or uninstalls
+            updates. Accepted values:
+
+            - Everyday
+            - Monday
+            - Tuesday
+            - Wednesday
+            - Thursday
+            - Friday
+            - Saturday
+
+        time (str):
+            Time at which Automatic Updates installs or uninstalls updates. Must
+            be in the ##:## 24hr format, eg. 3:00 PM would be 15:00. Must be in
+            1 hour increments.
+
+    Returns:
+
+        dict: Returns a dictionary containing the results.
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' win_wua.set_wu_settings level=4 recommended=True featured=False
+    '''
+    # The AutomaticUpdateSettings.Save() method used in this function does not
+    # work on Windows 10 / Server 2016. It is called in throughout this function
+    # like this:
+    #
+    #     obj_au = win32com.client.Dispatch('Microsoft.Update.AutoUpdate')
+    #     obj_au_settings = obj_au.Settings
+    #     obj_au_settings.Save()
+    #
+    # The `Save()` method reports success but doesn't actually change anything.
+    # Windows Update settings are read-only in Windows 10 / Server 2016. There's
+    # a little blurb on MSDN that mentions this, but gives no alternative for
+    # changing these settings in Windows 10 / Server 2016.
+    #
+    # https://msdn.microsoft.com/en-us/library/aa385829(v=vs.85).aspx
+    #
+    # Apparently the Windows Update framework in Windows Vista - Windows 8.1 has
+    # been changed quite a bit in Windows 10 / Server 2016. It is now called the
+    # Unified Update Platform (UUP). I haven't found an API or a Powershell
+    # commandlet for working with the the UUP. Perhaps there will be something
+    # forthcoming. The `win_lgpo` module might be an option for changing the
+    # Windows Update settings using local group policy.
+    ret = {'Success': True}
 
     # Initialize the PyCom system
     pythoncom.CoInitialize()
 
-    # Create a session with the Windows Update Agent
-    wua_session = win32com.client.Dispatch('Microsoft.Update.Session')
-    wua_session.ClientApplicationID = 'Salt: Install Update'
+    # Create an AutoUpdate object
+    obj_au = win32com.client.Dispatch('Microsoft.Update.AutoUpdate')
 
-    # Create the Searcher, Downloader, Installer, and Collections
-    wua_searcher = wua_session.CreateUpdateSearcher()
-    wua_download_list = win32com.client.Dispatch('Microsoft.Update.UpdateColl')
-    wua_downloader = wua_session.CreateUpdateDownloader()
-    wua_install_list = win32com.client.Dispatch('Microsoft.Update.UpdateColl')
-    wua_installer = wua_session.CreateUpdateInstaller()
+    # Create an AutoUpdate Settings Object
+    obj_au_settings = obj_au.Settings
 
-    ret = {}
-
-    # Searching for the GUID
-    search_string = ''
-    search_list = ''
-    log.debug('Searching for updates:')
-    for ident in guid:
-        log.debug('{0}'.format(ident))
-        if search_string == '':
-            search_string = 'UpdateID=\'{0}\''.format(ident.lower())
-            search_list = '{0}'.format(ident.lower())
+    # Only change the setting if it's passed
+    if level is not None:
+        obj_au_settings.NotificationLevel = int(level)
+        result = obj_au_settings.Save()
+        if result is None:
+            ret['Level'] = level
         else:
-            search_string += ' or UpdateID=\'{0}\''.format(ident.lower())
-            search_list += '\n{0}'.format(ident.lower())
-
-    try:
-        wua_search_result = wua_searcher.Search(search_string)
-        if wua_search_result.Updates.Count == 0:
-            log.debug('No Updates found for:\n\t\t{0}'.format(search_list))
+            ret['Comment'] = "Settings failed to save. Check permissions."
             ret['Success'] = False
-            ret['Details'] = 'No Updates found: {0}'.format(search_list)
-            return ret
-    except Exception:
-        log.debug('Invalid Search String: {0}'.format(search_string))
-        return 'Invalid Search String: {0}'.format(search_string)
 
-    # List updates found
-    log.debug('Found the following update:')
-    ret['Updates'] = {}
-    for update in wua_search_result.Updates:
-        # Check to see if the update is already installed
-        ret['Updates'][update.Identity.UpdateID] = {}
-        ret['Updates'][update.Identity.UpdateID]['Title'] = update.Title
-        if update.IsInstalled:
-            log.debug('Already Installed: {0}'.format(update.Identity.UpdateID))
-            log.debug('\tTitle: {0}'.format(update.Title))
-            ret['Updates'][update.Identity.UpdateID]['AlreadyInstalled'] = True
-        # Make sure the EULA has been accepted
-        if not update.EulaAccepted:
-            log.debug('Accepting EULA: {0}'.format(update.Title))
-            update.AcceptEula  # pylint: disable=W0104
-        # Add to the list of updates that need to be downloaded
-        if update.IsDownloaded:
-            log.debug('Already Downloaded: {0}'.format(update.Identity.UpdateID))
-            log.debug('\tTitle: {0}'.format(update.Title))
-            ret['Updates'][update.Identity.UpdateID]['AlreadyDownloaded'] = True
+    if recommended is not None:
+        obj_au_settings.IncludeRecommendedUpdates = recommended
+        result = obj_au_settings.Save()
+        if result is None:
+            ret['Recommended'] = recommended
         else:
-            log.debug('To Be Downloaded: {0}'.format(update.Identity.UpdateID))
-            log.debug('\tTitle: {0}'.format(update.Title))
-            ret['Updates'][update.Identity.UpdateID]['AlreadyDownloaded'] = False
-            wua_download_list.Add(update)
-
-    # Download the updates
-    if wua_download_list.Count == 0:
-        # Not necessarily a failure, perhaps the update has been downloaded
-        # but not installed
-        log.debug('No updates to download')
-    else:
-        # Otherwise, download the update
-        log.debug('Downloading...')
-        wua_downloader.Updates = wua_download_list
-
-        try:
-            wua_downloader.Download()
-            log.debug('Download Complete')
-
-        except Exception as error:
-
+            ret['Comment'] = "Settings failed to save. Check permissions."
             ret['Success'] = False
-            ret['Result'] = format(error)
 
-            hr, msg, exc, arg = error.args  # pylint: disable=W0633
-            # Error codes found at the following site:
-            # https://msdn.microsoft.com/en-us/library/windows/desktop/hh968413(v=vs.85).aspx
-            fc = {-2145124316: 'No Updates: 0x80240024',
-                  -2145124284: 'Access Denied: 0x8024044'}
+    if featured is not None:
+        obj_au_settings.FeaturedUpdatesEnabled = featured
+        result = obj_au_settings.Save()
+        if result is None:
+            ret['Featured'] = featured
+        else:
+            ret['Comment'] = "Settings failed to save. Check permissions."
+            ret['Success'] = False
+
+    if elevated is not None:
+        obj_au_settings.NonAdministratorsElevated = elevated
+        result = obj_au_settings.Save()
+        if result is None:
+            ret['Elevated'] = elevated
+        else:
+            ret['Comment'] = "Settings failed to save. Check permissions."
+            ret['Success'] = False
+
+    if day is not None:
+        # Check that day is valid
+        days = {'Everyday': 0,
+                'Sunday': 1,
+                'Monday': 2,
+                'Tuesday': 3,
+                'Wednesday': 4,
+                'Thursday': 5,
+                'Friday': 6,
+                'Saturday': 7}
+        if day not in days:
+            ret['Comment'] = "Day needs to be one of the following: Everyday," \
+                             "Monday, Tuesday, Wednesday, Thursday, Friday, " \
+                             "Saturday"
+            ret['Success'] = False
+        else:
+            # Set the numeric equivalent for the day setting
+            obj_au_settings.ScheduledInstallationDay = days[day]
+            result = obj_au_settings.Save()
+            if result is None:
+                ret['Day'] = day
+            else:
+                ret['Comment'] = "Settings failed to save. Check permissions."
+                ret['Success'] = False
+
+    if time is not None:
+        # Check for time as a string: if the time is not quoted, yaml will
+        # treat it as an integer
+        if not isinstance(time, six.string_types):
+            ret['Comment'] = "Time argument needs to be a string; it may need to"\
+                             "be quoted. Passed {0}. Time not set.".format(time)
+            ret['Success'] = False
+        # Check for colon in the time
+        elif ':' not in time:
+            ret['Comment'] = "Time argument needs to be in 00:00 format." \
+                             " Passed {0}. Time not set.".format(time)
+            ret['Success'] = False
+        else:
+            # Split the time by :
+            t = time.split(":")
+            # We only need the hours value
+            obj_au_settings.FeaturedUpdatesEnabled = t[0]
+            result = obj_au_settings.Save()
+            if result is None:
+                ret['Time'] = time
+            else:
+                ret['Comment'] = "Settings failed to save. Check permissions."
+                ret['Success'] = False
+
+    if msupdate is not None:
+        # Microsoft Update requires special handling
+        # First load the MS Update Service Manager
+        obj_sm = win32com.client.Dispatch('Microsoft.Update.ServiceManager')
+
+        # Give it a bogus name
+        obj_sm.ClientApplicationID = "My App"
+
+        if msupdate:
+            # msupdate is true, so add it to the services
             try:
-                failure_code = fc[exc[5]]
-            except KeyError:
-                failure_code = 'Unknown Failure: {0}'.format(error)
+                obj_sm.AddService2('7971f918-a847-4430-9279-4a52d1efe18d', 7, '')
+                ret['msupdate'] = msupdate
+            except Exception as error:
+                hr, msg, exc, arg = error.args  # pylint: disable=W0633
+                # Consider checking for -2147024891 (0x80070005) Access Denied
+                ret['Comment'] = "Failed with failure code: {0}".format(exc[5])
+                ret['Success'] = False
+        else:
+            # msupdate is false, so remove it from the services
+            # check to see if the update is there or the RemoveService function
+            # will fail
+            if _get_msupdate_status():
+                # Service found, remove the service
+                try:
+                    obj_sm.RemoveService('7971f918-a847-4430-9279-4a52d1efe18d')
+                    ret['msupdate'] = msupdate
+                except Exception as error:
+                    hr, msg, exc, arg = error.args  # pylint: disable=W0633
+                    # Consider checking for the following
+                    # -2147024891 (0x80070005) Access Denied
+                    # -2145091564 (0x80248014) Service Not Found (shouldn't get
+                    # this with the check for _get_msupdate_status above
+                    ret['Comment'] = "Failed with failure code: {0}".format(exc[5])
+                    ret['Success'] = False
+            else:
+                ret['msupdate'] = msupdate
 
-            log.debug('Download Failed: {0}'.format(failure_code))
-            ret['error_msg'] = failure_code
-            ret['location'] = 'Download Section of install_updates'
-            ret['file'] = 'win_wua.py'
-
-            return ret
-
-    # Install the updates
-    for update in wua_search_result.Updates:
-        # Make sure the update has actually been downloaded
-        if update.IsDownloaded:
-            log.debug('To be installed: {0}'.format(update.Title))
-            wua_install_list.Add(update)
-
-    if wua_install_list.Count == 0:
-        # There are not updates to install
-        # This would only happen if there was a problem with the download
-        # If this happens often, perhaps some error checking for the download
-        log.debug('No updates to install')
-        ret['Success'] = False
-        ret['Message'] = 'No Updates to install'
-        return ret
-
-    wua_installer.Updates = wua_install_list
-
-    # Try to run the installer
-    try:
-        result = wua_installer.Install()
-
-    except Exception as error:
-
-        # See if we know the problem, if not return the full error
-        ret['Success'] = False
-        ret['Result'] = format(error)
-
-        hr, msg, exc, arg = error.args  # pylint: disable=W0633
-        # Error codes found at the following site:
-        # https://msdn.microsoft.com/en-us/library/windows/desktop/hh968413(v=vs.85).aspx
-        fc = {-2145124316: 'No Updates: 0x80240024',
-              -2145124284: 'Access Denied: 0x8024044'}
-        try:
-            failure_code = fc[exc[5]]
-        except KeyError:
-            failure_code = 'Unknown Failure: {0}'.format(error)
-
-        log.debug('Download Failed: {0}'.format(failure_code))
-        ret['error_msg'] = failure_code
-        ret['location'] = 'Install Section of install_updates'
-        ret['file'] = 'win_wua.py'
-
-        return ret
-
-    rc = {0: 'Installation Not Started',
-          1: 'Installation In Progress',
-          2: 'Installation Succeeded',
-          3: 'Installation Succeeded With Errors',
-          4: 'Installation Failed',
-          5: 'Installation Aborted'}
-    log.debug(rc[result.ResultCode])
-
-    if result.ResultCode in [2, 3]:
-        ret['Success'] = True
-        ret['NeedsReboot'] = result.RebootRequired
-        log.debug('NeedsReboot: {0}'.format(result.RebootRequired))
-    else:
-        ret['Success'] = False
-
-    ret['Message'] = rc[result.ResultCode]
-    rb = {0: 'Never Reboot',
-          1: 'Always Reboot',
-          2: 'Poss Reboot'}
-    for i in range(wua_install_list.Count):
-        uid = wua_install_list.Item(i).Identity.UpdateID
-        ret['Updates'][uid]['Result'] = rc[result.GetUpdateResult(i).ResultCode]
-        ret['Updates'][uid]['RebootBehavior'] = rb[wua_install_list.Item(i).InstallationBehavior.RebootBehavior]
+    ret['Reboot'] = get_needs_reboot()
 
     return ret
+
+
+def get_wu_settings():
+    '''
+    Get current Windows Update settings.
+
+    Returns:
+
+        dict: A dictionary of Windows Update settings:
+
+        Featured Updates:
+            Boolean value that indicates whether to display notifications for
+            featured updates.
+        Group Policy Required (Read-only):
+            Boolean value that indicates whether Group Policy requires the
+            Automatic Updates service.
+        Microsoft Update:
+            Boolean value that indicates whether to turn on Microsoft Update for
+            other Microsoft Products
+        Needs Reboot:
+            Boolean value that indicates whether the machine is in a reboot
+            pending state.
+        Non Admins Elevated:
+            Boolean value that indicates whether non-administrators can perform
+            some update-related actions without administrator approval.
+        Notification Level:
+            Number 1 to 4 indicating the update level:
+                1. Never check for updates
+                2. Check for updates but let me choose whether to download and
+                   install them
+                3. Download updates but let me choose whether to install them
+                4. Install updates automatically
+        Read Only (Read-only):
+            Boolean value that indicates whether the Automatic Update
+            settings are read-only.
+        Recommended Updates:
+            Boolean value that indicates whether to include optional or
+            recommended updates when a search for updates and installation of
+            updates is performed.
+        Scheduled Day:
+            Days of the week on which Automatic Updates installs or uninstalls
+            updates.
+        Scheduled Time:
+            Time at which Automatic Updates installs or uninstalls updates.
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' win_wua.get_wu_settings
+    '''
+    ret = {}
+
+    day = ['Every Day',
+           'Sunday',
+           'Monday',
+           'Tuesday',
+           'Wednesday',
+           'Thursday',
+           'Friday',
+           'Saturday']
+
+    # Initialize the PyCom system
+    pythoncom.CoInitialize()
+
+    # Create an AutoUpdate object
+    obj_au = win32com.client.Dispatch('Microsoft.Update.AutoUpdate')
+
+    # Create an AutoUpdate Settings Object
+    obj_au_settings = obj_au.Settings
+
+    # Populate the return dictionary
+    ret['Featured Updates'] = obj_au_settings.FeaturedUpdatesEnabled
+    ret['Group Policy Required'] = obj_au_settings.Required
+    ret['Microsoft Update'] = _get_msupdate_status()
+    ret['Needs Reboot'] = get_needs_reboot()
+    ret['Non Admins Elevated'] = obj_au_settings.NonAdministratorsElevated
+    ret['Notification Level'] = obj_au_settings.NotificationLevel
+    ret['Read Only'] = obj_au_settings.ReadOnly
+    ret['Recommended Updates'] = obj_au_settings.IncludeRecommendedUpdates
+    ret['Scheduled Day'] = day[obj_au_settings.ScheduledInstallationDay]
+    # Scheduled Installation Time requires special handling to return the time
+    # in the right format
+    if obj_au_settings.ScheduledInstallationTime < 10:
+        ret['Scheduled Time'] = '0{0}:00'.\
+            format(obj_au_settings.ScheduledInstallationTime)
+    else:
+        ret['Scheduled Time'] = '{0}:00'.\
+            format(obj_au_settings.ScheduledInstallationTime)
+
+    return ret
+
+
+def _get_msupdate_status():
+    '''
+    Check to see if Microsoft Update is Enabled
+    Return Boolean
+    '''
+    # To get the status of Microsoft Update we actually have to check the
+    # Microsoft Update Service Manager
+    # Create a ServiceManager Object
+    obj_sm = win32com.client.Dispatch('Microsoft.Update.ServiceManager')
+
+    # Return a collection of loaded Services
+    col_services = obj_sm.Services
+
+    # Loop through the collection to find the Microsoft Udpate Service
+    # If it exists return True otherwise False
+    for service in col_services:
+        if service.name == 'Microsoft Update':
+            return True
+
+    return False
+
+
+def get_needs_reboot():
+    '''
+    Determines if the system needs to be rebooted.
+
+    Returns:
+
+        bool: True if the system requires a reboot, otherwise False
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' win_wua.get_needs_reboot
+    '''
+    return salt.utils.win_update.needs_reboot()

@@ -28,9 +28,10 @@ def present(name,
             backing=None,
             vgname=None,
             lvname=None,
+            thinpool=None,
             path=None):
     '''
-    .. versionchanged:: Beryllium
+    .. versionchanged:: 2015.8.0
 
         The :mod:`lxc.created <salt.states.lxc.created>` state has been renamed
         to ``lxc.present``, and the :mod:`lxc.cloned <salt.states.lxc.cloned>`
@@ -45,7 +46,7 @@ def present(name,
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
 
     running : False
@@ -54,7 +55,7 @@ def present(name,
         * If ``None``, do nothing with regards to the running state of the
           container
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     clone_from
         Create named container as a clone of the specified container
@@ -78,8 +79,11 @@ def present(name,
     **Container Creation Arguments**
 
     template
-        The template to use. E.g., 'ubuntu' or 'fedora'. Conflicts with the
-        ``image`` argument.
+        The template to use. For example, ``ubuntu`` or ``fedora``.
+        For a full list of available templates, check out
+        the :mod:`lxc.templates <salt.modules.lxc.templates>` function.
+
+        Conflicts with the ``image`` argument.
 
         .. note::
 
@@ -114,6 +118,10 @@ def present(name,
         Remember to double-indent the options, due to :ref:`how PyYAML works
         <nested-dict-indentation>`.
 
+        For available template options, refer to the lxc template scripts
+        which are ususally located under ``/usr/share/lxc/templates``,
+        or run ``lxc-create -t <template> -h``.
+
     image
         A tar archive to use as the rootfs for the container. Conflicts with
         the ``template`` argument.
@@ -135,6 +143,10 @@ def present(name,
 
     lvname
         Name of the LVM logical volume in which to create the volume for this
+        container. Only applicable if ``backing`` is set to ``lvm``.
+
+    thinpool
+        Name of a pool volume that will be used for thin-provisioning this
         container. Only applicable if ``backing`` is set to ``lvm``.
     '''
     ret = {'name': name,
@@ -239,7 +251,8 @@ def present(name,
                     backing=backing,
                     vgname=vgname,
                     path=path,
-                    lvname=lvname)
+                    lvname=lvname,
+                    thinpool=thinpool)
         except (CommandExecutionError, SaltInvocationError) as exc:
             ret['result'] = False
             ret['comment'] = exc.strerror
@@ -335,7 +348,7 @@ def absent(name, stop=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
 
     .. code-block:: yaml
@@ -390,7 +403,7 @@ def running(name, restart=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     restart : False
         Restart container if it is already running
@@ -487,7 +500,7 @@ def frozen(name, start=True, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
 
     start : True
@@ -575,7 +588,7 @@ def stopped(name, kill=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     kill : False
         Do not wait for the container to stop, kill all tasks in the container.
@@ -634,59 +647,6 @@ def stopped(name, kill=False, path=None):
     return ret
 
 
-# Deprecated states
-def created(name, **kwargs):
-    '''
-    .. deprecated:: 2015.5.0
-        Use :mod:`lxc.present <salt.states.lxc.present>`
-    '''
-    salt.utils.warn_until(
-        'Boron',
-        'The lxc.created state has been renamed to lxc.present, please use '
-        'lxc.present'
-    )
-    return present(name, **kwargs)
-
-
-def started(name, path=None, restart=False):
-    '''
-    .. deprecated:: 2015.5.0
-        Use :mod:`lxc.running <salt.states.lxc.running>`
-    '''
-    salt.utils.warn_until(
-        'Boron',
-        'The lxc.started state has been renamed to lxc.running, please use '
-        'lxc.running'
-    )
-    return running(name, restart=restart, path=path)
-
-
-def cloned(name,
-           orig,
-           snapshot=True,
-           size=None,
-           vgname=None,
-           path=None,
-           profile=None):
-    '''
-    .. deprecated:: 2015.5.0
-        Use :mod:`lxc.present <salt.states.lxc.present>`
-    '''
-    salt.utils.warn_until(
-        'Boron',
-        'The lxc.cloned state has been merged into the lxc.present state. '
-        'Please update your states to use lxc.present, with the '
-        '\'clone_from\' argument set to the name of the clone source.'
-    )
-    return present(name,
-                   clone_from=orig,
-                   snapshot=snapshot,
-                   size=size,
-                   vgname=vgname,
-                   path=path,
-                   profile=profile)
-
-
 def set_pass(name, **kwargs):  # pylint: disable=W0613
     '''
     .. deprecated:: 2015.5.0
@@ -726,11 +686,13 @@ def edited_conf(name, lxc_conf=None, lxc_conf_unset=None):
 
     Edit LXC configuration options
 
+    .. deprecated:: 2015.5.0
+
     path
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
 
     .. code-block:: bash
@@ -743,8 +705,11 @@ def edited_conf(name, lxc_conf=None, lxc_conf_unset=None):
             - lxc_conf_unset:
                 - lxc.utsname
     '''
+    # Until a reasonable alternative for this state function is created, we need
+    # to keep this function around and cannot officially remove it. Progress of
+    # the new function will be tracked in https://github.com/saltstack/salt/issues/35523
     salt.utils.warn_until(
-        'Boron',
+        'Oxygen',
         'This state is unsuitable for setting parameters that appear more '
         'than once in an LXC config file, or parameters which must appear in '
         'a certain order (such as when configuring more than one network '

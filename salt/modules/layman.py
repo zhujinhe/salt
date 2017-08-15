@@ -4,7 +4,7 @@ Support for Layman
 '''
 from __future__ import absolute_import
 
-import salt.utils
+import salt.utils.path
 import salt.exceptions
 
 
@@ -12,9 +12,9 @@ def __virtual__():
     '''
     Only work on Gentoo systems with layman installed
     '''
-    if __grains__['os'] == 'Gentoo' and salt.utils.which('layman'):
+    if __grains__['os'] == 'Gentoo' and salt.utils.path.which('layman'):
         return 'layman'
-    return False
+    return (False, 'layman execution module cannot be loaded: only available on Gentoo with layman installed.')
 
 
 def _get_makeconf():
@@ -47,7 +47,7 @@ def add(overlay):
     ret = list()
     old_overlays = list_local()
     cmd = 'layman --quietness=0 --add {0}'.format(overlay)
-    add_attempt = __salt__['cmd.run_all'](cmd, python_shell=False)
+    add_attempt = __salt__['cmd.run_all'](cmd, python_shell=False, stdin='y')
     if add_attempt['retcode'] != 0:
         raise salt.exceptions.CommandExecutionError(add_attempt['stdout'])
     new_overlays = list_local()

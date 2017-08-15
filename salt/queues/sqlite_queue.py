@@ -23,6 +23,9 @@ import re
 import sqlite3 as lite
 from salt.exceptions import SaltInvocationError
 
+# Import 3rd-party libs
+from salt.ext import six
+
 log = logging.getLogger(__name__)
 
 # Define the module's virtual name
@@ -139,7 +142,7 @@ def insert(queue, items):
     con = _conn(queue)
     with con:
         cur = con.cursor()
-        if isinstance(items, str):
+        if isinstance(items, six.string_types):
             items = _quote_escape(items)
             cmd = '''INSERT INTO {0}(name) VALUES('{1}')'''.format(queue, items)
             log.debug('SQL Query: {0}'.format(cmd))
@@ -171,7 +174,7 @@ def delete(queue, items):
     con = _conn(queue)
     with con:
         cur = con.cursor()
-        if isinstance(items, str):
+        if isinstance(items, six.string_types):
             items = _quote_escape(items)
             cmd = """DELETE FROM {0} WHERE name = '{1}'""".format(queue, items)
             log.debug('SQL Query: {0}'.format(cmd))
@@ -212,7 +215,7 @@ def pop(queue, quantity=1):
             items = [item[0] for item in result]
             itemlist = '","'.join(items)
             _quote_escape(itemlist)
-            del_cmd = '''DELETE FROM {0} WHERE name IN ('{1}')'''.format(
+            del_cmd = '''DELETE FROM {0} WHERE name IN ("{1}")'''.format(
                 queue, itemlist)
 
             log.debug('SQL Query: {0}'.format(del_cmd))

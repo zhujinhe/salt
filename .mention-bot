@@ -1,0 +1,12 @@
+{
+  "alwaysNotifyForPaths": [
+    {
+      "name": "ryan-lane",
+      "files": ["salt/**/*boto*.py"],
+      "skipTeamPrs": false
+    }
+  ],
+ "skipTitle": "Merge forward",
+ "userBlacklist": ["cvrebert", "markusgattol", "olliewalsh"]
+}
+

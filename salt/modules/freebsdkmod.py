@@ -9,7 +9,7 @@ import os
 import re
 
 # Import salt libs
-import salt.utils
+import salt.utils.files
 
 # Define the module's virtual name
 __virtualname__ = 'kmod'
@@ -25,7 +25,9 @@ def __virtual__():
     '''
     Only runs on FreeBSD systems
     '''
-    return __virtualname__ if __grains__['kernel'] == 'FreeBSD' else False
+    if __grains__['kernel'] == 'FreeBSD':
+        return __virtualname__
+    return (False, 'The freebsdkmod execution module cannot be loaded: only available on FreeBSD systems.')
 
 
 def _new_mods(pre_mods, post_mods):
@@ -68,7 +70,7 @@ def _get_persistent_modules():
     Returns a list of modules in loader.conf that load on boot.
     '''
     mods = set()
-    with salt.utils.fopen(_LOADER_CONF, 'r') as loader_conf:
+    with salt.utils.files.fopen(_LOADER_CONF, 'r') as loader_conf:
         for line in loader_conf:
             line = line.strip()
             mod_name = _get_module_name(line)

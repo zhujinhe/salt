@@ -6,12 +6,15 @@ Module for gathering disk information on Windows
 '''
 from __future__ import absolute_import
 
-# Import python libs
+# Import Python libs
 import ctypes
 import string
 
-# Import salt libs
-import salt.utils
+# Import Salt libs
+import salt.utils.platform
+
+# Import 3rd-party libs
+from salt.ext import six
 
 try:
     import win32api
@@ -22,13 +25,19 @@ except ImportError:
 __virtualname__ = 'disk'
 
 
+if six.PY3:
+    UPPERCASE = string.ascii_uppercase
+else:
+    UPPERCASE = string.uppercase
+
+
 def __virtual__():
     '''
     Only works on Windows systems
     '''
-    if salt.utils.is_windows():
+    if salt.utils.platform.is_windows():
         return __virtualname__
-    return False
+    return (False, "Module win_disk: module only works on Windows systems")
 
 
 def usage():
@@ -44,7 +53,7 @@ def usage():
     drives = []
     ret = {}
     drive_bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-    for letter in string.uppercase:
+    for letter in UPPERCASE:
         if drive_bitmask & 1:
             drives.append(letter)
         drive_bitmask >>= 1

@@ -1,18 +1,15 @@
 # -*- coding: utf-8 -*-
 '''
-:requires: clustershell
-
-https://github.com/cea-hpc/clustershell
-
 This roster resolves hostname in a pdsh/clustershell style.
 
-When you want to use host globs for target matching, use --roster clustershell.
+:depends: clustershell, https://github.com/cea-hpc/clustershell
 
-Example:
+When you want to use host globs for target matching, use ``--roster clustershell``. For example:
 
 .. code-block:: bash
 
     salt-ssh --roster clustershell 'server_[1-10,21-30],test_server[5,7,9]' test.ping
+
 '''
 
 # Import python libs
@@ -46,6 +43,7 @@ def targets(tgt, tgt_type='glob', **kwargs):
 
     for host, addr in host_addrs.items():
         addr = str(addr)
+        ret[addr] = __opts__.get('roster_defaults', {}).copy()
         for port in ports:
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -53,7 +51,7 @@ def targets(tgt, tgt_type='glob', **kwargs):
                 sock.connect((addr, port))
                 sock.shutdown(socket.SHUT_RDWR)
                 sock.close()
-                ret[host] = {'host': host, 'port': port}
+                ret[host].update({'host': host, 'port': port})
             except socket.error:
                 pass
     return ret

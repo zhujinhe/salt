@@ -18,7 +18,7 @@ import logging
 log = logging.getLogger(__name__)
 
 # Import salt libs
-import salt.utils
+import salt.utils.path
 
 HAS_PYCASSA = False
 try:
@@ -33,11 +33,11 @@ def __virtual__():
     Only load if pycassa is available and the system is configured
     '''
     if not HAS_PYCASSA:
-        return False
+        return (False, 'The cassandra execution module cannot be loaded: pycassa not installed.')
 
-    if HAS_PYCASSA and salt.utils.which('nodetool'):
+    if HAS_PYCASSA and salt.utils.path.which('nodetool'):
         return 'cassandra'
-    return False
+    return (False, 'The cassandra execution module cannot be loaded: nodetool not found.')
 
 
 def _nodetool(cmd):

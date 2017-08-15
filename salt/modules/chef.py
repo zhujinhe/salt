@@ -10,11 +10,12 @@ import os
 import tempfile
 
 # Import Salt libs
-import salt.utils
-import salt.utils.decorators as decorators
+import salt.utils.path
+import salt.utils.platform
+import salt.utils.decorators.path
 
 # Import 3rd-party libs
-import salt.ext.six as six
+from salt.ext import six
 
 log = logging.getLogger(__name__)
 
@@ -23,8 +24,8 @@ def __virtual__():
     '''
     Only load if chef is installed
     '''
-    if not salt.utils.which('chef-client'):
-        return False
+    if not salt.utils.path.which('chef-client'):
+        return (False, 'Cannot load chef module: chef-client not found')
     return True
 
 
@@ -32,7 +33,7 @@ def _default_logfile(exe_name):
     '''
     Retrieve the logfile name
     '''
-    if salt.utils.is_windows():
+    if salt.utils.platform.is_windows():
         tmp_dir = os.path.join(__opts__['cachedir'], 'tmp')
         if not os.path.isdir(tmp_dir):
             os.mkdir(tmp_dir)
@@ -43,7 +44,7 @@ def _default_logfile(exe_name):
         logfile = logfile_tmp.name
         logfile_tmp.close()
     else:
-        logfile = salt.utils.path_join(
+        logfile = salt.utils.path.join(
             '/var/log',
             '{0}.log'.format(exe_name)
         )
@@ -51,7 +52,7 @@ def _default_logfile(exe_name):
     return logfile
 
 
-@decorators.which('chef-client')
+@salt.utils.decorators.path.which('chef-client')
 def client(whyrun=False,
            localmode=False,
            logfile=None,
@@ -124,7 +125,7 @@ def client(whyrun=False,
 
     '''
     if logfile is None:
-        logfile = _default_logfile('chef-client'),
+        logfile = _default_logfile('chef-client')
     args = ['chef-client',
             '--no-color',
             '--once',
@@ -140,7 +141,7 @@ def client(whyrun=False,
     return _exec_cmd(*args, **kwargs)
 
 
-@decorators.which('chef-solo')
+@salt.utils.decorators.path.which('chef-solo')
 def solo(whyrun=False,
          logfile=None,
          **kwargs):
@@ -193,7 +194,7 @@ def solo(whyrun=False,
         Enable whyrun mode when set to True
     '''
     if logfile is None:
-        logfile = _default_logfile('chef-solo'),
+        logfile = _default_logfile('chef-solo')
     args = ['chef-solo',
             '--no-color',
             '--logfile "{0}"'.format(logfile),

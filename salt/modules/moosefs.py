@@ -5,16 +5,16 @@ Module for gathering and managing information about MooseFS
 from __future__ import absolute_import
 
 # Import salt libs
-import salt.utils
+import salt.utils.path
 
 
 def __virtual__():
     '''
     Only load if the mfs commands are installed
     '''
-    if salt.utils.which('mfsgetgoal'):
+    if salt.utils.path.which('mfsgetgoal'):
         return 'moosefs'
-    return False
+    return (False, 'The moosefs execution module cannot be loaded: the mfsgetgoal binary is not in the path.')
 
 
 def dirinfo(path, opts=None):

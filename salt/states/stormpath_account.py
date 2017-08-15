@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 '''
-Support for Stormpath
+Support for Stormpath.
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.8.0
 '''
 
 # Import python libs
@@ -52,14 +52,18 @@ def present(name, **kwargs):
 
     customData.
         Optional. Must be specified as a dict.
-
-    .. versionadded:: Beryllium
     '''
     # Because __opts__ is not available outside of functions
-    if __opts__.get('requests_lib', False):
+    backend = __opts__.get('backend', False)
+    if not backend:
+        backend = 'requests'
+
+    if backend == 'requests':
         from requests.exceptions import HTTPError
-    else:
+    elif backend == 'urrlib2':
         from urllib2 import HTTPError
+    else:
+        from tornado.httpclient import HTTPError
 
     ret = {'name': name,
            'changes': {},
@@ -74,7 +78,7 @@ def present(name, **kwargs):
         pass
     needs_update = {}
     if info.get('email', False):
-        for field in kwargs.keys():
+        for field in kwargs:
             if info.get(field, None) != kwargs[field]:
                 needs_update[field] = kwargs[field]
         del needs_update['directory_id']
@@ -136,14 +140,18 @@ def absent(name, directory_id=None):
         each will be scanned for the account. Specifying a directory_id will
         therefore cut down on the number of requests to Stormpath, and increase
         performance of this state.
-
-    .. versionadded:: Beryllium
     '''
     # Because __opts__ is not available outside of functions
-    if __opts__.get('requests_lib', False):
+    backend = __opts__.get('backend', False)
+    if not backend:
+        backend = 'requests'
+
+    if backend == 'requests':
         from requests.exceptions import HTTPError
-    else:
+    elif backend == 'urrlib2':
         from urllib2 import HTTPError
+    else:
+        from tornado.httpclient import HTTPError
 
     ret = {'name': name,
            'changes': {},

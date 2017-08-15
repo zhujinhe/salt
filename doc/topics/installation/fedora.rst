@@ -1,11 +1,21 @@
-==================================
+======
 Fedora
-==================================
+======
 
 Beginning with version 0.9.4, Salt has been available in the primary Fedora
-repositories and `EPEL`_. It is installable using yum. Fedora will have more
-up to date versions of Salt than other members of the Red Hat family, which
-makes it a great place to help improve Salt!
+repositories and `EPEL`_. It is installable using ``yum`` or ``dnf``, depending
+on your version of Fedora.
+
+.. note::
+
+    Released versions of Salt starting with ``2015.5.2`` through ``2016.3.2``
+    do not have Fedora packages available though `EPEL`_. To install a version
+    of Salt within this release array, please use SaltStack's `Bootstrap Script`_
+    and use the git method of installing Salt using the version's associated
+    release tag.
+
+    Release ``2016.3.3`` and onward will have packaged versions available via
+    `EPEL`_.
 
 **WARNING**: Fedora 19 comes with systemd 204.  Systemd has known bugs fixed in
 later revisions that prevent the salt-master from starting reliably or opening
@@ -31,8 +41,6 @@ will be one master and multiple minions.
     yum install salt-master
     yum install salt-minion
 
-.. _`EPEL`: http://fedoraproject.org/wiki/EPEL
-
 Installing from ``updates-testing``
 -----------------------------------
 
@@ -45,6 +53,37 @@ To install from ``updates-testing``, use the ``enablerepo`` argument for yum:
 
     yum --enablerepo=updates-testing install salt-master
     yum --enablerepo=updates-testing install salt-minion
+
+Installation Using pip
+======================
+
+Since Salt is on `PyPI`_, it can be installed using pip, though most users
+prefer to install using a package manager.
+
+Installing from pip has a few additional requirements:
+
+* Install the group 'Development Tools', ``dnf groupinstall 'Development Tools'``
+* Install the 'zeromq-devel' package if it fails on linking against that
+  afterwards as well.
+
+A pip install does not make the init scripts or the /etc/salt directory, and you
+will need to provide your own systemd service unit.
+
+Installation from pip:
+
+.. code-block:: bash
+
+    pip install salt
+
+.. warning::
+
+    If installing from pip (or from source using ``setup.py install``), be
+    advised that the ``yum-utils`` package is needed for Salt to manage
+    packages. Also, if the Python dependencies are not already installed, then
+    you will need additional libraries/tools installed to build some of them.
+    More information on this can be found :ref:`here
+    <installing-for-development>`.
+
 
 Post-installation tasks
 =======================
@@ -77,4 +116,8 @@ To start the Minion:
 
     systemctl start salt-minion.service
 
-Now go to the :doc:`Configuring Salt</ref/configuration/index>` page.
+Now go to the :ref:`Configuring Salt<configuring-salt>` page.
+
+.. _`Bootstrap Script`: https://github.com/saltstack/salt-bootstrap
+.. _`EPEL`: http://fedoraproject.org/wiki/EPEL
+.. _`PyPI`: https://pypi.python.org/pypi/salt

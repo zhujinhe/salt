@@ -3,7 +3,7 @@
 QingCloud Cloud Module
 ======================
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.8.0
 
 The QingCloud cloud module is used to control access to the QingCloud.
 http://www.qingcloud.com/
@@ -17,7 +17,7 @@ Set up the cloud configuration at ``/etc/salt/cloud.providers`` or
 .. code-block:: yaml
 
     my-qingcloud:
-      provider: qingcloud
+      driver: qingcloud
       access_key_id: AKIDMRTGYONNLTFFRBQJ
       secret_access_key: clYwH21U5UOmcov4aNV2V2XocaHCG3JZGcxEczFu
       zone: pek2
@@ -26,9 +26,8 @@ Set up the cloud configuration at ``/etc/salt/cloud.providers`` or
 :depends: requests
 '''
 
-from __future__ import absolute_import
-
 # Import python libs
+from __future__ import absolute_import
 import time
 import json
 import pprint
@@ -37,12 +36,9 @@ import hmac
 import base64
 from hashlib import sha256
 
-# Import 3rd-party libs
-import requests
+# Import Salt Libs
 from salt.ext.six.moves.urllib.parse import quote as _quote  # pylint: disable=import-error,no-name-in-module
 from salt.ext.six.moves import range
-
-# Import salt cloud libs
 import salt.utils.cloud
 import salt.config as config
 from salt.exceptions import (
@@ -52,9 +48,18 @@ from salt.exceptions import (
     SaltCloudExecutionTimeout
 )
 
+# Import Third Party Libs
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+
 
 # Get logging started
 log = logging.getLogger(__name__)
+
+__virtualname__ = 'qingcloud'
 
 DEFAULT_QINGCLOUD_API_VERSION = 1
 DEFAULT_QINGCLOUD_SIGNATURE_VERSION = 1
@@ -68,7 +73,10 @@ def __virtual__():
     if get_configured_provider() is False:
         return False
 
-    return True
+    if get_dependencies() is False:
+        return False
+
+    return __virtualname__
 
 
 def get_configured_provider():
@@ -77,8 +85,18 @@ def get_configured_provider():
     '''
     return config.is_provider_configured(
         __opts__,
-        __active_provider_name__ or 'qingcloud',
+        __active_provider_name__ or __virtualname__,
         ('access_key_id', 'secret_access_key', 'zone', 'key_filename')
+    )
+
+
+def get_dependencies():
+    '''
+    Warn if dependencies aren't met.
+    '''
+    return config.check_driver_dependencies(
+        __virtualname__,
+        {'requests': HAS_REQUESTS}
     )
 
 
@@ -160,7 +178,7 @@ def query(params=None):
     if request.status_code != 200:
         raise SaltCloudSystemExit(
             'An error occurred while querying QingCloud. HTTP Code: {0}  '
-            'Error: {1!r}'.format(
+            'Error: \'{1}\''.format(
                 request.status_code,
                 request.text
             )
@@ -230,7 +248,7 @@ def _get_location(vm_=None):
         return vm_location
 
     raise SaltCloudNotFound(
-        'The specified location, {0!r}, could not be found.'.format(
+        'The specified location, \'{0}\', could not be found.'.format(
             vm_location
         )
     )
@@ -301,7 +319,7 @@ def _get_image(vm_):
         return vm_image
 
     raise SaltCloudNotFound(
-        'The specified image, {0!r}, could not be found.'.format(vm_image)
+        'The specified image, \'{0}\', could not be found.'.format(vm_image)
     )
 
 
@@ -422,7 +440,7 @@ def _get_size(vm_):
         return vm_size
 
     raise SaltCloudNotFound(
-        'The specified size, {0!r}, could not be found.'.format(vm_size)
+        'The specified size, \'{0}\', could not be found.'.format(vm_size)
     )
 
 
@@ -499,7 +517,7 @@ def list_nodes_full(call=None):
         provider = comps[0]
 
     __opts__['update_cachedir'] = True
-    salt.utils.cloud.cache_node_list(result, provider, __opts__)
+    __utils__['cloud.cache_node_list'](result, provider, __opts__)
 
     return result
 
@@ -605,7 +623,7 @@ def show_instance(instance_id, call=None, kwargs=None):
 
     if items['total_count'] == 0:
         raise SaltCloudNotFound(
-            'The specified instance, {0!r}, could not be found.'.format(instance_id)
+            'The specified instance, \'{0}\', could not be found.'.format(instance_id)
         )
 
     full_node = items['instance_set'][0]
@@ -638,15 +656,22 @@ def create(vm_):
         salt-cloud -p qingcloud-ubuntu-c1m1 hostname1
         salt-cloud -m /path/to/mymap.sls -P
     '''
-    salt.utils.cloud.fire_event(
+    try:
+        # Check for required profile parameters before sending any API calls.
+        if vm_['profile'] and config.is_profile_configured(__opts__,
+                                                           __active_provider_name__ or 'qingcloud',
+                                                           vm_['profile'],
+                                                           vm_=vm_) is False:
+            return False
+    except AttributeError:
+        pass
+
+    __utils__['cloud.fire_event'](
         'event',
         'starting create',
         'salt/cloud/{0}/creating'.format(vm_['name']),
-        {
-            'name': vm_['name'],
-            'profile': vm_['profile'],
-            'provider': vm_['provider'],
-        },
+        args=__utils__['cloud.filter_event']('creating', vm_, ['name', 'profile', 'provider', 'driver']),
+        sock_dir=__opts__['sock_dir'],
         transport=__opts__['transport']
     )
 
@@ -664,11 +689,14 @@ def create(vm_):
         'login_keypair': vm_['login_keypair'],
     }
 
-    salt.utils.cloud.fire_event(
+    __utils__['cloud.fire_event'](
         'event',
         'requesting instance',
         'salt/cloud/{0}/requesting'.format(vm_['name']),
-        {'kwargs': params},
+        args={
+            'kwargs': __utils__['cloud.filter_event']('requesting', params, list(params)),
+        },
+        sock_dir=__opts__['sock_dir'],
         transport=__opts__['transport']
     )
 
@@ -702,25 +730,22 @@ def create(vm_):
     vm_['ssh_host'] = private_ip
 
     # The instance is booted and accessible, let's Salt it!
-    salt.utils.cloud.bootstrap(vm_, __opts__)
+    __utils__['cloud.bootstrap'](vm_, __opts__)
 
-    log.info('Created Cloud VM {0[name]!r}'.format(vm_))
+    log.info('Created Cloud VM \'{0[name]}\''.format(vm_))
 
     log.debug(
-        '{0[name]!r} VM creation details:\n{1}'.format(
+        '\'{0[name]}\' VM creation details:\n{1}'.format(
             vm_, pprint.pformat(data)
         )
     )
 
-    salt.utils.cloud.fire_event(
+    __utils__['cloud.fire_event'](
         'event',
         'created instance',
         'salt/cloud/{0}/created'.format(vm_['name']),
-        {
-            'name': vm_['name'],
-            'profile': vm_['profile'],
-            'provider': vm_['provider'],
-        },
+        args=__utils__['cloud.filter_event']('created', vm_, ['name', 'profile', 'provider', 'driver']),
+        sock_dir=__opts__['sock_dir'],
         transport=__opts__['transport']
     )
 
@@ -846,11 +871,12 @@ def destroy(instance_id, call=None):
     instance_data = show_instance(instance_id, call='action')
     name = instance_data['instance_name']
 
-    salt.utils.cloud.fire_event(
+    __utils__['cloud.fire_event'](
         'event',
         'destroying instance',
         'salt/cloud/{0}/destroying'.format(name),
-        {'name': name},
+        args={'name': name},
+        sock_dir=__opts__['sock_dir'],
         transport=__opts__['transport']
     )
 
@@ -861,11 +887,12 @@ def destroy(instance_id, call=None):
     }
     result = query(params)
 
-    salt.utils.cloud.fire_event(
+    __utils__['cloud.fire_event'](
         'event',
         'destroyed instance',
         'salt/cloud/{0}/destroyed'.format(name),
-        {'name': name},
+        args={'name': name},
+        sock_dir=__opts__['sock_dir'],
         transport=__opts__['transport']
     )
 

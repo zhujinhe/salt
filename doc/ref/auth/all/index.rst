@@ -1,8 +1,8 @@
 .. _all-salt.auth:
 
-=================================
-Full list of builtin auth modules
-=================================
+============
+auth modules
+============
 
 .. currentmodule:: salt.auth
 
@@ -17,5 +17,7 @@ Full list of builtin auth modules
     mysql
     pam
     pki
+    rest
+    sharedsecret
     stormpath
     yubico

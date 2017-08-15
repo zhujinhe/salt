@@ -32,17 +32,84 @@ from __future__ import absolute_import
 # Import python libs
 import re
 import os.path
+import logging
 import difflib
 
 # Import Salt libs
-import salt.utils
+import salt.utils.args
+import salt.utils.files
+
+from salt.modules.augeas_cfg import METHOD_MAP
+
+log = logging.getLogger(__name__)
 
 
 def __virtual__():
     return 'augeas' if 'augeas.execute' in __salt__ else False
 
 
-def change(name, context=None, changes=None, lens=None, **kwargs):
+def _workout_filename(filename):
+    '''
+    Recursively workout the file name from an augeas change
+    '''
+    if os.path.isfile(filename) or filename == '/':
+        if filename == '/':
+            filename = None
+        return filename
+    else:
+        return _workout_filename(os.path.dirname(filename))
+
+
+def _check_filepath(changes):
+    '''
+    Ensure all changes are fully qualified and affect only one file.
+    This ensures that the diff output works and a state change is not
+    incorrectly reported.
+    '''
+    filename = None
+    for change_ in changes:
+        try:
+            cmd, arg = change_.split(' ', 1)
+
+            if cmd not in METHOD_MAP:
+                error = 'Command {0} is not supported (yet)'.format(cmd)
+                raise ValueError(error)
+            method = METHOD_MAP[cmd]
+            parts = salt.utils.args.shlex_split(arg)
+            if method in ['set', 'setm', 'move', 'remove']:
+                filename_ = parts[0]
+            else:
+                _, _, filename_ = parts
+            if not filename_.startswith('/files'):
+                error = 'Changes should be prefixed with ' \
+                        '/files if no context is provided,' \
+                        ' change: {0}'.format(change_)
+                raise ValueError(error)
+            filename_ = re.sub('^/files|/$', '', filename_)
+            if filename is not None:
+                if filename != filename_:
+                    error = 'Changes should be made to one ' \
+                            'file at a time, detected changes ' \
+                            'to {0} and {1}'.format(filename, filename_)
+                    raise ValueError(error)
+            filename = filename_
+        except (ValueError, IndexError) as err:
+            log.error(str(err))
+            if 'error' not in locals():
+                error = 'Invalid formatted command, ' \
+                               'see debug log for details: {0}' \
+                               .format(change_)
+            else:
+                error = str(err)
+            raise ValueError(error)
+
+    filename = _workout_filename(filename)
+
+    return filename
+
+
+def change(name, context=None, changes=None, lens=None,
+        load_path=None, **kwargs):
     '''
     .. versionadded:: 2014.7.0
 
@@ -55,8 +122,15 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
         State name
 
     context
-        The context to use. Set this to a file path, prefixed by ``/files``, to
-        avoid redundancy, e.g.:
+        A file path, prefixed by ``/files``. Should resolve to an actual file
+        (not an arbitrary augeas path). This is used to avoid duplicating the
+        file name for each item in the changes list (for example, ``set bind 0.0.0.0``
+        in the example below operates on the file specified by ``context``). If
+        ``context`` is not specified, a file path prefixed by ``/files`` should be
+        included with the ``set`` command.
+
+        The file path is examined to determine if the
+        specified changes are already present.
 
         .. code-block:: yaml
 
@@ -69,12 +143,20 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
 
     changes
         List of changes that are issued to Augeas. Available commands are
-        ``set``, ``mv``/``move``, ``ins``/``insert``, and ``rm``/``remove``.
+        ``set``, ``setm``, ``mv``/``move``, ``ins``/``insert``, and
+        ``rm``/``remove``.
 
     lens
-        The lens to use, needs to be suffixed with `.lns`, e.g.: `Nginx.lns`. See
-        the `list of stock lenses <http://augeas.net/stock_lenses.html>`_
+        The lens to use, needs to be suffixed with `.lns`, e.g.: `Nginx.lns`.
+        See the `list of stock lenses <http://augeas.net/stock_lenses.html>`_
         shipped with Augeas.
+
+    .. versionadded:: 2016.3.0
+
+    load_path
+        A list of directories that modules should be searched in. This is in
+        addition to the standard load path and the directories in
+        AUGEAS_LENS_LIB.
 
 
     Usage examples:
@@ -119,7 +201,7 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
 
         redis-conf:
           augeas.change:
-            - lens: redis
+            - lens: redis.lns
             - context: /files/etc/redis/redis.conf
             - changes:
               - set bind 0.0.0.0
@@ -143,21 +225,34 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
 
         zabbix-service:
           augeas.change:
-            - lens: services
+            - lens: services.lns
             - context: /files/etc/services
             - changes:
               - ins service-name after service-name[last()]
-              - set service-name[last()] zabbix-agent
-              - set service-name[. = 'zabbix-agent']/#comment "Zabbix Agent service"
-              - set service-name[. = 'zabbix-agent']/port 10050
-              - set service-name[. = 'zabbix-agent']/protocol tcp
-              - rm service-name[. = 'im-obsolete']
+              - set service-name[last()] "zabbix-agent"
+              - set "service-name[. = 'zabbix-agent']/port" 10050
+              - set "service-name[. = 'zabbix-agent']/protocol" tcp
+              - set "service-name[. = 'zabbix-agent']/#comment" "Zabbix Agent service"
+              - rm "service-name[. = 'im-obsolete']"
             - unless: grep "zabbix-agent" /etc/services
 
     .. warning::
 
-        Don't forget the ``unless`` here, otherwise a new entry will be added
-        every time this state is run.
+        Don't forget the ``unless`` here, otherwise it will fail on next runs
+        because the service is already defined. Additionally you have to quote
+        lines containing ``service-name[. = 'zabbix-agent']`` otherwise
+        :mod:`augeas_cfg <salt.modules.augeas_cfg>` execute will fail because
+        it will receive more parameters than expected.
+
+    .. note::
+
+        Order is important when defining a service with Augeas, in this case
+        it's ``port``, ``protocol`` and ``#comment``. For more info about
+        the lens check `services lens documentation`_.
+
+    .. _services lens documentation:
+
+    http://augeas.net/docs/references/lenses/files/services-aug.html#Services.record
 
     '''
     ret = {'name': name, 'result': False, 'comment': '', 'changes': {}}
@@ -166,8 +261,25 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
         ret['comment'] = '\'changes\' must be specified as a list'
         return ret
 
+    if load_path is not None:
+        if not isinstance(load_path, list):
+            ret['comment'] = '\'load_path\' must be specified as a list'
+            return ret
+        else:
+            load_path = ':'.join(load_path)
+
+    filename = None
+    if context is None:
+        try:
+            filename = _check_filepath(changes)
+        except ValueError as err:
+            ret['comment'] = 'Error: {0}'.format(str(err))
+            return ret
+    else:
+        filename = re.sub('^/files|/$', '', context)
+
     if __opts__['test']:
-        ret['result'] = None
+        ret['result'] = True
         ret['comment'] = 'Executing commands'
         if context:
             ret['comment'] += ' in file "{0}":\n'.format(context)
@@ -175,13 +287,14 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
         return ret
 
     old_file = []
-    if context:
-        filename = re.sub('^/files|/$', '', context)
+    if filename is not None:
         if os.path.isfile(filename):
-            with salt.utils.fopen(filename, 'r') as file_:
+            with salt.utils.files.fopen(filename, 'r') as file_:
                 old_file = file_.readlines()
 
-    result = __salt__['augeas.execute'](context=context, lens=lens, commands=changes)
+    result = __salt__['augeas.execute'](
+        context=context, lens=lens,
+        commands=changes, load_path=load_path)
     ret['result'] = result['retval']
 
     if ret['result'] is False:
@@ -189,8 +302,9 @@ def change(name, context=None, changes=None, lens=None, **kwargs):
         return ret
 
     if old_file:
-        with salt.utils.fopen(filename, 'r') as file_:
-            diff = ''.join(difflib.unified_diff(old_file, file_.readlines(), n=0))
+        with salt.utils.files.fopen(filename, 'r') as file_:
+            diff = ''.join(
+                difflib.unified_diff(old_file, file_.readlines(), n=0))
 
         if diff:
             ret['comment'] = 'Changes have been saved'

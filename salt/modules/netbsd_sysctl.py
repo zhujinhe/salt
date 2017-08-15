@@ -7,7 +7,7 @@ import os
 import re
 
 # Import salt libs
-import salt.utils
+import salt.utils.files
 from salt.exceptions import CommandExecutionError
 
 # Define the module's virtual name
@@ -18,7 +18,10 @@ def __virtual__():
     '''
     Only run on NetBSD systems
     '''
-    return __virtualname__ if __grains__['os'] == 'NetBSD' else False
+    if __grains__['os'] == 'NetBSD':
+        return __virtualname__
+    return (False, 'The netbsd_sysctl execution module failed to load: '
+            'only available on NetBSD.')
 
 
 def show(config_file=False):
@@ -114,12 +117,13 @@ def persist(name, value, config='/etc/sysctl.conf'):
     # create /etc/sysctl.conf if not present
     if not os.path.isfile(config):
         try:
-            salt.utils.fopen(config, 'w+').close()
+            with salt.utils.files.fopen(config, 'w+'):
+                pass
         except (IOError, OSError):
             msg = 'Could not create {0}'
             raise CommandExecutionError(msg.format(config))
 
-    with salt.utils.fopen(config, 'r') as ifile:
+    with salt.utils.files.fopen(config, 'r') as ifile:
         for line in ifile:
             m = re.match(r'{0}(\??=)'.format(name), line)
             if not m:
@@ -144,7 +148,7 @@ def persist(name, value, config='/etc/sysctl.conf'):
         newline = '{0}={1}'.format(name, value)
         nlines.append("{0}\n".format(newline))
 
-    with salt.utils.fopen(config, 'w+') as ofile:
+    with salt.utils.files.fopen(config, 'w+') as ofile:
         ofile.writelines(nlines)
 
     assign(name, value)

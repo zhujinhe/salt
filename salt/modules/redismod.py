@@ -15,8 +15,9 @@ Module to provide redis functionality to Salt
     redis.password: None
 '''
 
-# Import Pytho libs
+# Import Python libs
 from __future__ import absolute_import
+from salt.ext.six.moves import zip
 
 # Import third party libs
 try:
@@ -35,7 +36,7 @@ def __virtual__():
     if HAS_REDIS:
         return __virtualname__
     else:
-        return False
+        return (False, 'The redis execution module failed to load: the redis python library is not available.')
 
 
 def _connect(host=None, port=None, db=None, password=None):
@@ -52,6 +53,20 @@ def _connect(host=None, port=None, db=None, password=None):
         password = __salt__['config.option']('redis.password')
 
     return redis.StrictRedis(host, port, db, password)
+
+
+def _sconnect(host=None, port=None, password=None):
+    '''
+    Returns an instance of the redis client
+    '''
+    if host is None:
+        host = __salt__['config.option']('redis_sentinel.host', 'localhost')
+    if port is None:
+        port = __salt__['config.option']('redis_sentinel.port', 26379)
+    if password is None:
+        password = __salt__['config.option']('redis_sentinel.password')
+
+    return redis.StrictRedis(host, port, password=password)
 
 
 def bgrewriteaof(host=None, port=None, db=None, password=None):
@@ -229,6 +244,42 @@ def get_key(key, host=None, port=None, db=None, password=None):
     return server.get(key)
 
 
+def hdel(key, *fields, **options):
+    '''
+    Delete one of more hash fields.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hdel foo_hash bar_field1 bar_field2
+    '''
+    host = options.get('host', None)
+    port = options.get('port', None)
+    database = options.get('db', None)
+    password = options.get('password', None)
+    server = _connect(host, port, database, password)
+    return server.hdel(key, *fields)
+
+
+def hexists(key, field, host=None, port=None, db=None, password=None):
+    '''
+    Determine if a hash fields exists.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hexists foo_hash bar_field
+    '''
+    server = _connect(host, port, db, password)
+    return server.hexists(key, field)
+
+
 def hget(key, field, host=None, port=None, db=None, password=None):
     '''
     Get specific field value from a redis hash, returns dict
@@ -255,6 +306,158 @@ def hgetall(key, host=None, port=None, db=None, password=None):
     '''
     server = _connect(host, port, db, password)
     return server.hgetall(key)
+
+
+def hincrby(key, field, increment=1, host=None, port=None, db=None, password=None):
+    '''
+    Increment the integer value of a hash field by the given number.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hincrby foo_hash bar_field 5
+    '''
+    server = _connect(host, port, db, password)
+    return server.hincrby(key, field, amount=increment)
+
+
+def hincrbyfloat(key, field, increment=1.0, host=None, port=None, db=None, password=None):
+    '''
+    Increment the float value of a hash field by the given number.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hincrbyfloat foo_hash bar_field 5.17
+    '''
+    server = _connect(host, port, db, password)
+    return server.hincrbyfloat(key, field, amount=increment)
+
+
+def hlen(key, host=None, port=None, db=None, password=None):
+    '''
+    Returns number of fields of a hash.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hlen foo_hash
+    '''
+    server = _connect(host, port, db, password)
+    return server.hlen(key)
+
+
+def hmget(key, *fields, **options):
+    '''
+    Returns the values of all the given hash fields.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hmget foo_hash bar_field1 bar_field2
+    '''
+    host = options.get('host', None)
+    port = options.get('port', None)
+    database = options.get('db', None)
+    password = options.get('password', None)
+    server = _connect(host, port, database, password)
+    return server.hmget(key, *fields)
+
+
+def hmset(key, **fieldsvals):
+    '''
+    Sets multiple hash fields to multiple values.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hmset foo_hash bar_field1=bar_value1 bar_field2=bar_value2
+    '''
+    host = fieldsvals.pop('host', None)
+    port = fieldsvals.pop('port', None)
+    database = fieldsvals.pop('db', None)
+    password = fieldsvals.pop('password', None)
+    server = _connect(host, port, database, password)
+    return server.hmset(key, **fieldsvals)
+
+
+def hset(key, field, value, host=None, port=None, db=None, password=None):
+    '''
+    Set the value of a hash field.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hset foo_hash bar_field bar_value
+    '''
+    server = _connect(host, port, db, password)
+    return server.hset(key, field, value)
+
+
+def hsetnx(key, field, value, host=None, port=None, db=None, password=None):
+    '''
+    Set the value of a hash field only if the field does not exist.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hsetnx foo_hash bar_field bar_value
+    '''
+    server = _connect(host, port, db, password)
+    return server.hsetnx(key, field, value)
+
+
+def hvals(key, host=None, port=None, db=None, password=None):
+    '''
+    Return all the values in a hash.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hvals foo_hash bar_field1 bar_value1
+    '''
+    server = _connect(host, port, db, password)
+    return server.hvals(key)
+
+
+def hscan(key, cursor=0, match=None, count=None, host=None, port=None, db=None, password=None):
+    '''
+    Incrementally iterate hash fields and associated values.
+
+    .. versionadded:: 2017.7.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.hscan foo_hash match='field_prefix_*' count=1
+    '''
+    server = _connect(host, port, db, password)
+    return server.hscan(key, cursor=cursor, match=match, count=count)
 
 
 def info(host=None, port=None, db=None, password=None):
@@ -488,3 +691,38 @@ def zrange(key, start, stop, host=None, port=None, db=None, password=None):
     '''
     server = _connect(host, port, db, password)
     return server.zrange(key, start, stop)
+
+
+def sentinel_get_master_ip(master, host=None, port=None, password=None):
+    '''
+    Get ip for sentinel master
+
+    .. versionadded: 2016.3.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.sentinel_get_master_ip 'mymaster'
+    '''
+    server = _sconnect(host, port, password)
+    ret = server.sentinel_get_master_addr_by_name(master)
+    return dict(list(zip(('master_host', 'master_port'), ret)))
+
+
+def get_master_ip(host=None, port=None, password=None):
+    '''
+    Get host information about slave
+
+    .. versionadded: 2016.3.0
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' redis.get_master_ip
+    '''
+    server = _connect(host, port, password)
+    srv_info = server.info()
+    ret = (srv_info.get('master_host', ''), srv_info.get('master_port', ''))
+    return dict(list(zip(('master_host', 'master_port'), ret)))

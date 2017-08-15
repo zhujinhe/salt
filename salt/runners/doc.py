@@ -13,7 +13,7 @@ import salt.runner
 import salt.wheel
 
 # Import 3rd-party libs
-import salt.ext.six as six
+from salt.ext import six
 from salt.exceptions import SaltClientError
 
 
@@ -72,10 +72,10 @@ def execution():
             for v in six.itervalues(ret):
                 docs.update(v)
     except SaltClientError as exc:
-        print(exc)  # pylint: disable=W1698
+        print(exc)
         return []
 
-    i = itertools.chain.from_iterable([six.iteritems(i) for i in six.itervalues(docs)])
+    i = itertools.chain.from_iterable([six.iteritems(docs['ret'])])
     ret = dict(list(i))
 
     return ret

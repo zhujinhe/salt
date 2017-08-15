@@ -7,12 +7,12 @@ Note: This module depends on the dicts packed by the loader and,
 therefore, must be accessed via the loader or from the __utils__ dict.
 
 The __utils__ dict will not be automatically available to execution modules
-until Beryllium. The `salt.utils.compat.pack_dunder` helper function
+until 2015.8.0. The `salt.utils.compat.pack_dunder` helper function
 provides backwards compatibility.
 
 This module provides common functionality for the boto execution modules.
-The expected usage is to call `apply_funcs` from the `__virtual__` function
-of the module. This will bring properly initilized partials of  `_get_conn`
+The expected usage is to call `assign_funcs` from the `__virtual__` function
+of the module. This will bring properly initialized partials of  `_get_conn`
 and `_cache_id` into the module's namespace.
 
 Example Usage:
@@ -25,13 +25,13 @@ Example Usage:
             # only required in 2015.2
             salt.utils.compat.pack_dunder(__name__)
 
-            __utils__['boto.apply_funcs'](__name__, 'vpc')
+            __utils__['boto.assign_funcs'](__name__, 'vpc')
 
         def test():
             conn = _get_conn()
             vpc_id = _cache_id('test-vpc')
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.8.0
 '''
 
 # Import Python libs
@@ -39,14 +39,16 @@ from __future__ import absolute_import
 import hashlib
 import logging
 import sys
-from distutils.version import LooseVersion as _LooseVersion  # pylint: disable=import-error,no-name-in-module
 from functools import partial
+from salt.loader import minion_mods
 
 # Import salt libs
-from salt.ext.six import string_types  # pylint: disable=import-error
+from salt.ext import six
 from salt.ext.six.moves import range  # pylint: disable=import-error,redefined-builtin
 from salt.exceptions import SaltInvocationError
-from salt._compat import ElementTree as ET
+from salt.utils.versions import LooseVersion as _LooseVersion
+import salt.utils
+import salt.utils.stringutils
 
 # Import third party libs
 # pylint: disable=import-error
@@ -64,6 +66,8 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
+__salt__ = None
+
 
 def __virtual__():
     '''
@@ -77,46 +81,37 @@ def __virtual__():
     elif _LooseVersion(boto.__version__) < _LooseVersion(required_boto_version):
         return False
     else:
+        global __salt__
+        if not __salt__:
+            __salt__ = minion_mods(__opts__)
         return True
-
-
-def _option(value):
-    '''
-    Look up the value for an option.
-    '''
-    if value in __opts__:
-        return __opts__[value]
-    master_opts = __pillar__.get('master', {})
-    if value in master_opts:
-        return master_opts[value]
-    if value in __pillar__:
-        return __pillar__[value]
 
 
 def _get_profile(service, region, key, keyid, profile):
     if profile:
-        if isinstance(profile, string_types):
-            _profile = _option(profile)
+        if isinstance(profile, six.string_types):
+            _profile = __salt__['config.option'](profile)
         elif isinstance(profile, dict):
             _profile = profile
         key = _profile.get('key', None)
         keyid = _profile.get('keyid', None)
-        region = _profile.get('region', None)
-
-    if not region and _option(service + '.region'):
-        region = _option(service + '.region')
+        region = _profile.get('region', region or None)
+    if not region and __salt__['config.option'](service + '.region'):
+        region = __salt__['config.option'](service + '.region')
 
     if not region:
         region = 'us-east-1'
-
-    if not key and _option(service + '.key'):
-        key = _option(service + '.key')
-    if not keyid and _option(service + '.keyid'):
-        keyid = _option(service + '.keyid')
+    if not key and __salt__['config.option'](service + '.key'):
+        key = __salt__['config.option'](service + '.key')
+    if not keyid and __salt__['config.option'](service + '.keyid'):
+        keyid = __salt__['config.option'](service + '.keyid')
 
     label = 'boto_{0}:'.format(service)
     if keyid:
-        cxkey = label + hashlib.md5(region + keyid + key).hexdigest()
+        hash_string = region + keyid + key
+        if six.PY3:
+            hash_string = salt.utils.stringutils.to_bytes(hash_string)
+        cxkey = label + hashlib.md5(hash_string).hexdigest()
     else:
         cxkey = label + region
 
@@ -185,8 +180,9 @@ def get_connection(service, module=None, region=None, key=None, keyid=None,
     '''
 
     module = module or service
+    module, submodule = ('boto.' + module).rsplit('.', 1)
 
-    svc_mod = __import__('boto.' + module, fromlist=[module])
+    svc_mod = getattr(__import__(module, fromlist=[submodule]), submodule)
 
     cxkey, region, key, keyid = _get_profile(service, region, key,
                                              keyid, profile)
@@ -222,26 +218,26 @@ def get_connection_func(service, module=None):
 
 
 def get_error(e):
+    # The returns from boto modules vary greatly between modules. We need to
+    # assume that none of the data we're looking for exists.
     aws = {}
-    if e.status:
+    if hasattr(e, 'status'):
         aws['status'] = e.status
-    if e.reason:
+    if hasattr(e, 'reason'):
         aws['reason'] = e.reason
+    if hasattr(e, 'message') and e.message != '':
+        aws['message'] = e.message
+    if hasattr(e, 'error_code') and e.error_code is not None:
+        aws['code'] = e.error_code
 
-    try:
-        body = e.body or ''
-        error = ET.fromstring(body).find('Errors').find('Error')
-        error = {'code': error.find('Code').text,
-                 'message': error.find('Message').text}
-    except (AttributeError, SyntaxError, ET.ParseError):
-        error = None
-
-    if error:
-        aws.update(error)
-        message = '{0}: {1}'.format(aws.get('reason', ''),
-                                    error['message'])
+    if 'message' in aws and 'reason' in aws:
+        message = '{0}: {1}'.format(aws['reason'], aws['message'])
+    elif 'message' in aws:
+        message = aws['message']
+    elif 'reason' in aws:
+        message = aws['reason']
     else:
-        message = aws.get('reason')
+        message = ''
     r = {'message': message}
     if aws:
         r['aws'] = aws
@@ -261,7 +257,7 @@ def exactly_one(l):
     return exactly_n(l)
 
 
-def assign_funcs(modname, service, module=None):
+def assign_funcs(modname, service, module=None, pack=None):
     '''
     Assign _get_conn and _cache_id functions to the named module.
 
@@ -269,6 +265,9 @@ def assign_funcs(modname, service, module=None):
 
         _utils__['boto.assign_partials'](__name__, 'ec2')
     '''
+    if pack:
+        global __salt__  # pylint: disable=W0601
+        __salt__ = pack
     mod = sys.modules[modname]
     setattr(mod, '_get_conn', get_connection_func(service, module=module))
     setattr(mod, '_cache_id', cache_id_func(service))
@@ -276,3 +275,18 @@ def assign_funcs(modname, service, module=None):
     # TODO: Remove this and import salt.utils.exactly_one into boto_* modules instead
     # Leaving this way for now so boto modules can be back ported
     setattr(mod, '_exactly_one', exactly_one)
+
+
+def paged_call(function, *args, **kwargs):
+    """Retrieve full set of values from a boto API call that may truncate
+    its results, yielding each page as it is obtained.
+    """
+    marker_flag = kwargs.pop('marker_flag', 'marker')
+    marker_arg = kwargs.pop('marker_flag', 'marker')
+    while True:
+        ret = function(*args, **kwargs)
+        marker = ret.get(marker_flag)
+        yield ret
+        if not marker:
+            break
+        kwargs[marker_arg] = marker

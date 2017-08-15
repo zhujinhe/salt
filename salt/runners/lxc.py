@@ -14,14 +14,15 @@ import logging
 
 # Import Salt libs
 import salt.client
-import salt.utils
-import salt.utils.virt
+import salt.utils.args
 import salt.utils.cloud
+import salt.utils.files
+import salt.utils.virt
 import salt.key
 from salt.utils.odict import OrderedDict as _OrderedDict
 
 # Import 3rd-party lib
-import salt.ext.six as six
+from salt.ext import six
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def _do(name, fun, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
     '''
     host = find_guest(name, quiet=True, path=path)
     if not host:
@@ -67,7 +68,7 @@ def _do_names(names, fun, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
     '''
     ret = {}
     hosts = find_guests(names, path=path)
@@ -100,7 +101,7 @@ def find_guest(name, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
 
     .. code-block:: bash
@@ -108,7 +109,7 @@ def find_guest(name, quiet=False, path=None):
         salt-run lxc.find_guest name
     '''
     if quiet:
-        log.warn('\'quiet\' argument is being deprecated.'
+        log.warning("'quiet' argument is being deprecated."
                  ' Please migrate to --quiet')
     for data in _list_iter(path=path):
         host, l = next(six.iteritems(data))
@@ -131,7 +132,7 @@ def find_guests(names, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     '''
     ret = {}
@@ -175,7 +176,7 @@ def init(names, host=None, saltcloud_mode=False, quiet=False, **kwargs):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     saltcloud_mode
         init the container with the saltcloud opts format instead
@@ -234,7 +235,7 @@ def init(names, host=None, saltcloud_mode=False, quiet=False, **kwargs):
     '''
     path = kwargs.get('path', None)
     if quiet:
-        log.warn('\'quiet\' argument is being deprecated.'
+        log.warning("'quiet' argument is being deprecated."
                  ' Please migrate to --quiet')
     ret = {'comment': '', 'result': True}
     if host is None:
@@ -275,7 +276,7 @@ def init(names, host=None, saltcloud_mode=False, quiet=False, **kwargs):
         ret['result'] = False
         return ret
 
-    kw = salt.utils.clean_kwargs(**kwargs)
+    kw = salt.utils.args.clean_kwargs(**kwargs)
     pub_key = kw.get('pub_key', None)
     priv_key = kw.get('priv_key', None)
     explicit_auth = pub_key and priv_key
@@ -308,13 +309,15 @@ def init(names, host=None, saltcloud_mode=False, quiet=False, **kwargs):
     cmds = []
     for name in names:
         args = [name]
-        kw = salt.utils.clean_kwargs(**kwargs)
+        kw = salt.utils.args.clean_kwargs(**kwargs)
         if saltcloud_mode:
             kw = copy.deepcopy(kw)
             kw['name'] = name
+            saved_kwargs = kw
             kw = client.cmd(
                 host, 'lxc.cloud_init_interface', args + [kw],
-                expr_form='list', timeout=600).get(host, {})
+                tgt_type='list', timeout=600).get(host, {})
+            kw.update(saved_kwargs)
         name = kw.pop('name', name)
         # be sure not to seed an already seeded host
         kw['seed'] = seeds.get(name, seed_arg)
@@ -370,10 +373,10 @@ def init(names, host=None, saltcloud_mode=False, quiet=False, **kwargs):
         if explicit_auth:
             fcontent = ''
             if os.path.exists(key):
-                with salt.utils.fopen(key) as fic:
+                with salt.utils.files.fopen(key) as fic:
                     fcontent = fic.read().strip()
             if pub_key.strip() != fcontent:
-                with salt.utils.fopen(key, 'w') as fic:
+                with salt.utils.files.fopen(key, 'w') as fic:
                     fic.write(pub_key)
                     fic.flush()
         mid = j_ret.get('mid', None)
@@ -416,13 +419,13 @@ def cloud_init(names, host=None, quiet=False, **kwargs):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     saltcloud_mode
         init the container with the saltcloud opts format instead
     '''
     if quiet:
-        log.warn('\'quiet\' argument is being deprecated. Please migrate to --quiet')
+        log.warning("'quiet' argument is being deprecated. Please migrate to --quiet")
     return __salt__['lxc.init'](names=names, host=host,
                                 saltcloud_mode=True, quiet=quiet, **kwargs)
 
@@ -435,7 +438,7 @@ def _list_iter(host=None, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
     '''
     tgt = host or '*'
     client = salt.client.get_local_client(__opts__['conf_file'])
@@ -469,7 +472,7 @@ def list_(host=None, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 
@@ -494,7 +497,7 @@ def purge(name, delete_key=True, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 
@@ -525,7 +528,7 @@ def start(name, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 
@@ -546,7 +549,7 @@ def stop(name, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 
@@ -567,7 +570,7 @@ def freeze(name, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 
@@ -588,7 +591,7 @@ def unfreeze(name, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 
@@ -609,7 +612,7 @@ def info(name, quiet=False, path=None):
         path to the container parent
         default: /var/lib/lxc (system default)
 
-        .. versionadded:: Beryllium
+        .. versionadded:: 2015.8.0
 
     .. code-block:: bash
 

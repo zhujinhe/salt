@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-A returner that will infor a Django system that
+A returner that will inform a Django system that
 returns are available using Django's signal system.
 
 https://docs.djangoproject.com/en/dev/topics/signals/
@@ -16,7 +16,7 @@ them.
 An example Django module that registers a function called
 'returner_callback' with this module's 'returner' function:
 
-    .. code-block:: python
+.. code-block:: python
 
     import salt.returners.django_return
     from django.dispatch import receiver
@@ -50,7 +50,7 @@ __virtualname__ = 'django'
 
 def __virtual__():
     if not HAS_DJANGO:
-        return False
+        return False, 'Could not import django returner; django is not installed.'
     return True
 
 
@@ -65,7 +65,7 @@ def returner(ret):
                   'which responded with {1}'.format(signal[0], signal[1]))
 
 
-def save_load(jid, load):
+def save_load(jid, load, minions=None):
     '''
     Save the load to the specified jid
     '''

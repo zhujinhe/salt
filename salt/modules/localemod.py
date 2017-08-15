@@ -8,11 +8,19 @@ from __future__ import absolute_import
 import logging
 import re
 import os
+HAS_DBUS = False
+try:
+    import dbus
+    HAS_DBUS = True
+except ImportError:
+    pass
 
-# Import salt libs
-import salt.utils
+# Import Salt libs
 import salt.utils.locales
-import salt.ext.six as six
+import salt.utils.path
+import salt.utils.platform
+import salt.utils.systemd
+from salt.ext import six
 from salt.exceptions import CommandExecutionError
 
 log = logging.getLogger(__name__)
@@ -25,9 +33,34 @@ def __virtual__():
     '''
     Only work on POSIX-like systems
     '''
-    if salt.utils.is_windows():
-        return False
+    if salt.utils.platform.is_windows():
+        return (False, 'Cannot load locale module: windows platforms are unsupported')
+
     return __virtualname__
+
+
+def _parse_dbus_locale():
+    '''
+    Get the 'System Locale' parameters from dbus
+    '''
+    bus = dbus.SystemBus()
+    localed = bus.get_object('org.freedesktop.locale1',
+                             '/org/freedesktop/locale1')
+    properties = dbus.Interface(localed, 'org.freedesktop.DBus.Properties')
+    system_locale = properties.Get('org.freedesktop.locale1', 'Locale')
+
+    ret = {}
+    for env_var in system_locale:
+        match = re.match('^([A-Z_]+)=(.*)$', env_var)
+        if match:
+            ret[match.group(1)] = match.group(2).replace('"', '')
+        else:
+            log.error('Odd locale parameter "{0}" detected in dbus locale '
+                      'output. This should not happen. You should '
+                      'probably investigate what caused this.'.format(
+                          env_var))
+
+    return ret
 
 
 def _parse_localectl():
@@ -35,28 +68,25 @@ def _parse_localectl():
     Get the 'System Locale' parameters from localectl
     '''
     ret = {}
-    for line in __salt__['cmd.run']('localectl').splitlines():
-        cols = [x.strip() for x in line.split(':', 1)]
-        if len(cols) > 1:
-            cur_param = cols.pop(0)
-        if cur_param == 'System Locale':
-            try:
-                key, val = re.match('^([A-Z_]+)=(.*)$', cols[0]).groups()
-            except AttributeError:
-                log.error('Odd locale parameter "{0}" detected in localectl '
-                          'output. This should not happen. localectl should '
-                          'catch this. You should probably investigate what '
-                          'caused this.'.format(cols[0]))
-            else:
-                ret[key] = val.replace('"', '')
+    localectl_out = __salt__['cmd.run']('localectl')
+    reading_locale = False
+    for line in localectl_out.splitlines():
+        if 'System Locale:' in line:
+            line = line.replace('System Locale:', '')
+            reading_locale = True
+
+        if not reading_locale:
+            continue
+
+        match = re.match('^([A-Z_]+)=(.*)$', line.strip())
+        if not match:
+            break
+        ret[match.group(1)] = match.group(2).replace('"', '')
+    else:
+        raise CommandExecutionError('Could not find system locale - could not '
+            'parse localectl output\n{0}'.format(localectl_out))
+
     return ret
-
-
-def _localectl_get():
-    '''
-    Use systemd's localectl command to get the current locale
-    '''
-    return _parse_localectl().get('LANG', '')
 
 
 def _localectl_set(locale=''):
@@ -64,7 +94,7 @@ def _localectl_set(locale=''):
     Use systemd's localectl command to set the LANG locale parameter, making
     sure not to trample on other params that have been set.
     '''
-    locale_params = _parse_localectl()
+    locale_params = _parse_dbus_locale() if HAS_DBUS else _parse_localectl()
     locale_params['LANG'] = str(locale)
     args = ' '.join(['{0}="{1}"'.format(k, v)
                      for k, v in six.iteritems(locale_params)])
@@ -98,15 +128,24 @@ def get_locale():
         salt '*' locale.get_locale
     '''
     cmd = ''
-    if 'Arch' in __grains__['os_family']:
-        return _localectl_get()
+    if 'Suse' in __grains__['os_family']:
+        # this block applies to all SUSE systems - also with systemd
+        cmd = 'grep "^RC_LANG" /etc/sysconfig/language'
+    elif salt.utils.systemd.booted(__context__):
+        params = _parse_dbus_locale() if HAS_DBUS else _parse_localectl()
+        return params.get('LANG', '')
     elif 'RedHat' in __grains__['os_family']:
         cmd = 'grep "^LANG=" /etc/sysconfig/i18n'
     elif 'Debian' in __grains__['os_family']:
+        # this block only applies to Debian without systemd
         cmd = 'grep "^LANG=" /etc/default/locale'
     elif 'Gentoo' in __grains__['os_family']:
         cmd = 'eselect --brief locale show'
         return __salt__['cmd.run'](cmd).strip()
+    elif 'Solaris' in __grains__['os_family']:
+        cmd = 'grep "^LANG=" /etc/default/init'
+    else:  # don't waste time on a failing cmd.run
+        raise CommandExecutionError('Error: Unsupported platform!')
 
     try:
         return __salt__['cmd.run'](cmd).split('=')[1].replace('"', '')
@@ -124,7 +163,17 @@ def set_locale(locale):
 
         salt '*' locale.set_locale 'en_US.UTF-8'
     '''
-    if 'Arch' in __grains__['os_family']:
+    if 'Suse' in __grains__['os_family']:
+        # this block applies to all SUSE systems - also with systemd
+        if not __salt__['file.file_exists']('/etc/sysconfig/language'):
+            __salt__['file.touch']('/etc/sysconfig/language')
+        __salt__['file.replace'](
+            '/etc/sysconfig/language',
+            '^RC_LANG=.*',
+            'RC_LANG="{0}"'.format(locale),
+            append_if_not_found=True
+        )
+    elif salt.utils.systemd.booted(__context__):
         return _localectl_set(locale)
     elif 'RedHat' in __grains__['os_family']:
         if not __salt__['file.file_exists']('/etc/sysconfig/i18n'):
@@ -136,7 +185,8 @@ def set_locale(locale):
             append_if_not_found=True
         )
     elif 'Debian' in __grains__['os_family']:
-        update_locale = salt.utils.which('update-locale')
+        # this block only applies to Debian without systemd
+        update_locale = salt.utils.path.which('update-locale')
         if update_locale is None:
             raise CommandExecutionError(
                 'Cannot set locale: "update-locale" was not found.')
@@ -152,6 +202,17 @@ def set_locale(locale):
     elif 'Gentoo' in __grains__['os_family']:
         cmd = 'eselect --brief locale set {0}'.format(locale)
         return __salt__['cmd.retcode'](cmd, python_shell=False) == 0
+    elif 'Solaris' in __grains__['os_family']:
+        if locale not in __salt__['locale.list_avail']():
+            return False
+        __salt__['file.replace'](
+            '/etc/default/init',
+            '^LANG=.*',
+            'LANG="{0}"'.format(locale),
+            append_if_not_found=True
+        )
+    else:
+        raise CommandExecutionError('Error: Unsupported platform!')
 
     return True
 
@@ -204,37 +265,47 @@ def gen_locale(locale, **kwargs):
     on_ubuntu = __grains__.get('os') == 'Ubuntu'
     on_gentoo = __grains__.get('os_family') == 'Gentoo'
     on_suse = __grains__.get('os_family') == 'Suse'
+    on_solaris = __grains__.get('os_family') == 'Solaris'
+
+    if on_solaris:  # all locales are pre-generated
+        return locale in __salt__['locale.list_avail']()
+
     locale_info = salt.utils.locales.split_locale(locale)
+    locale_search_str = '{0}_{1}'.format(locale_info['language'], locale_info['territory'])
+
+    # if the charmap has not been supplied, normalize by appening it
+    if not locale_info['charmap'] and not on_ubuntu:
+        locale_info['charmap'] = locale_info['codeset']
+        locale = salt.utils.locales.join_locale(locale_info)
 
     if on_debian or on_gentoo:  # file-based search
         search = '/usr/share/i18n/SUPPORTED'
-        valid = __salt__['file.search'](search, '^{0}$'.format(locale))
-        if not valid and not locale_info['charmap']:
-            # charmap was not supplied, so try copying the codeset
-            locale_info['charmap'] = locale_info['codeset']
-            locale = salt.utils.locales.join_locale(locale_info)
-            valid = __salt__['file.search'](search, '^{0}$'.format(locale))
+        valid = __salt__['file.search'](search,
+                                        '^{0}$'.format(locale),
+                                        flags=re.MULTILINE)
     else:  # directory-based search
         if on_suse:
             search = '/usr/share/locale'
         else:
             search = '/usr/share/i18n/locales'
+
         try:
-            valid = "{0}_{1}".format(locale_info['language'],
-                                     locale_info['territory']) in os.listdir(search)
+            valid = locale_search_str in os.listdir(search)
         except OSError as ex:
             log.error(ex)
-            raise CommandExecutionError("Locale \"{0}\" is not available.".format(locale))
+            raise CommandExecutionError(
+                "Locale \"{0}\" is not available.".format(locale))
 
     if not valid:
-        log.error('The provided locale "{0}" is not found in {1}'.format(locale, search))
+        log.error(
+            'The provided locale "{0}" is not found in {1}'.format(locale, search))
         return False
 
     if os.path.exists('/etc/locale.gen'):
         __salt__['file.replace'](
             '/etc/locale.gen',
             r'^\s*#\s*{0}\s*$'.format(locale),
-            '{0}'.format(locale),
+            '{0}\n'.format(locale),
             append_if_not_found=True
         )
     elif on_ubuntu:
@@ -248,18 +319,19 @@ def gen_locale(locale, **kwargs):
             append_if_not_found=True
         )
 
-    if salt.utils.which("locale-gen") is not None:
+    if salt.utils.path.which('locale-gen'):
         cmd = ['locale-gen']
         if on_gentoo:
             cmd.append('--generate')
-        if not on_ubuntu:
+        if on_ubuntu:
+            cmd.append(salt.utils.locales.normalize_locale(locale))
+        else:
             cmd.append(locale)
-    elif salt.utils.which("localedef") is not None:
-        cmd = ['localedef', '--force',
-               '-i', "{0}_{1}".format(locale_info['language'], locale_info['territory']),
-               '-f', locale_info['codeset'],
-               locale]
-        cmd.append(kwargs.get('verbose', False) and '--verbose' or '--quiet')
+    elif salt.utils.path.which('localedef'):
+        cmd = ['localedef', '--force', '-i', locale_search_str, '-f', locale_info['codeset'],
+               '{0}.{1}'.format(locale_search_str,
+                                locale_info['codeset']),
+               kwargs.get('verbose', False) and '--verbose' or '--quiet']
     else:
         raise CommandExecutionError(
             'Command "locale-gen" or "localedef" was not found on this system.')

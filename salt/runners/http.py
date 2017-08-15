@@ -19,7 +19,7 @@ def query(url, output=True, **kwargs):
     '''
     Query a resource, and decode the return data
 
-    .. versionadded:: 2015.2
+    .. versionadded:: 2015.5.0
 
     CLI Example:
 
@@ -32,11 +32,15 @@ def query(url, output=True, **kwargs):
             data='<xml>somecontent</xml>'
     '''
     if output is not True:
-        log.warn('Output option has been deprecated. Please use --quiet.')
+        log.warning('Output option has been deprecated. Please use --quiet.')
     if 'node' not in kwargs:
         kwargs['node'] = 'master'
+    opts = __opts__.copy()
+    if 'opts' in kwargs:
+        opts.update(kwargs['opts'])
+        del kwargs['opts']
 
-    ret = salt.utils.http.query(url=url, opts=__opts__, **kwargs)
+    ret = salt.utils.http.query(url=url, opts=opts, **kwargs)
     return ret
 
 
@@ -44,7 +48,7 @@ def update_ca_bundle(target=None, source=None, merge_files=None):
     '''
     Update the local CA bundle file from a URL
 
-    .. versionadded:: 2015.2
+    .. versionadded:: 2015.5.0
 
     CLI Example:
 

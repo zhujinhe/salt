@@ -7,9 +7,16 @@ Utility functions for SMB connections
 
 from __future__ import absolute_import
 
+# Import python libs
+import salt.utils.files
+import logging
+
+log = logging.getLogger(__name__)
+
 try:
     import impacket.smbconnection
-    from impacket.smbconnection import SessionError
+    from impacket.smbconnection import SessionError as smbSessionError
+    from impacket.smb3 import SessionError as smb3SessionError
     HAS_IMPACKET = True
 except ImportError:
     HAS_IMPACKET = False
@@ -41,6 +48,9 @@ def get_conn(host=None, username=None, password=None):
     '''
     Get an SMB connection
     '''
+    if not HAS_IMPACKET:
+        return False
+
     conn = impacket.smbconnection.SMBConnection(
         remoteName='*SMBSERVER',
         remoteHost=host,
@@ -59,13 +69,17 @@ def mkdirs(path, share='C$', conn=None, host=None, username=None, password=None)
     if conn is None:
         conn = get_conn(host, username, password)
 
+    if conn is False:
+        return False
+
     comps = path.split('/')
     pos = 1
     for comp in comps:
         cwd = '\\'.join(comps[0:pos])
         try:
             conn.listPath(share, cwd)
-        except SessionError:
+        except (smbSessionError, smb3SessionError) as exc:
+            log.debug('Exception: {0}'.format(exc))
             conn.createDirectory(share, cwd)
         pos += 1
 
@@ -78,5 +92,29 @@ def put_str(content, path, share='C$', conn=None, host=None, username=None, pass
     if conn is None:
         conn = get_conn(host, username, password)
 
+    if conn is False:
+        return False
+
     fh_ = StrHandle(content)
     conn.putFile(share, path, fh_.string)
+
+
+def put_file(local_path, path, share='C$', conn=None, host=None, username=None, password=None):
+    '''
+    Wrapper around impacket.smbconnection.putFile() that allows a file to be
+    uploaded
+
+    Example usage:
+
+        import salt.utils.smb
+        smb_conn = salt.utils.smb.get_conn('10.0.0.45', 'vagrant', 'vagrant')
+        salt.utils.smb.put_file('/root/test.pdf', 'temp\\myfiles\\test1.pdf', conn=smb_conn)
+    '''
+    if conn is None:
+        conn = get_conn(host, username, password)
+
+    if conn is False:
+        return False
+
+    with salt.utils.files.fopen(local_path, 'rb') as fh_:
+        conn.putFile(share, path, fh_.read)

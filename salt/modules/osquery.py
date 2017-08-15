@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 '''
-Support for OSQuery - https://osquery.io
+Support for OSQuery - https://osquery.io.
+
+.. versionadded:: 2015.8.0
 '''
 from __future__ import absolute_import
 
@@ -8,7 +10,8 @@ from __future__ import absolute_import
 import json
 
 # Import Salt libs
-import salt.utils
+import salt.utils.path
+import salt.utils.platform
 
 import logging
 log = logging.getLogger(__name__)
@@ -20,11 +23,14 @@ __func_alias__ = {
     'time_': 'time',
 }
 
+__virtualname__ = 'osquery'
+
 
 def __virtual__():
-    if salt.utils.which('osqueryi'):
-        return 'osquery'
-    return False
+    if salt.utils.path.which('osqueryi'):
+        return __virtualname__
+    return (False, 'The osquery execution module cannot be loaded: '
+                   'osqueryi binary is not in the path.')
 
 
 def _table_attrs(table):
@@ -106,8 +112,6 @@ def _osquery_cmd(table, attrs=None, where=None, format='json'):
 
 def version():
     '''
-    .. versionadded:: Beryllium
-
     Return version of osquery
 
     CLI Example:
@@ -123,8 +127,6 @@ def version():
 
 def rpm_packages(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return cpuid information from osquery
 
     CLI Example:
@@ -140,8 +142,6 @@ def rpm_packages(attrs=None, where=None):
 
 def kernel_integrity(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return kernel_integrity information from osquery
 
     CLI Example:
@@ -157,8 +157,6 @@ def kernel_integrity(attrs=None, where=None):
 
 def kernel_modules(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return kernel_modules information from osquery
 
     CLI Example:
@@ -174,8 +172,6 @@ def kernel_modules(attrs=None, where=None):
 
 def memory_map(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return memory_map information from osquery
 
     CLI Example:
@@ -191,8 +187,6 @@ def memory_map(attrs=None, where=None):
 
 def process_memory_map(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return process_memory_map information from osquery
 
     CLI Example:
@@ -208,8 +202,6 @@ def process_memory_map(attrs=None, where=None):
 
 def shared_memory(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return shared_memory information from osquery
 
     CLI Example:
@@ -225,8 +217,6 @@ def shared_memory(attrs=None, where=None):
 
 def apt_sources(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return apt_sources information from osquery
 
     CLI Example:
@@ -242,8 +232,6 @@ def apt_sources(attrs=None, where=None):
 
 def deb_packages(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return deb_packages information from osquery
 
     CLI Example:
@@ -259,8 +247,6 @@ def deb_packages(attrs=None, where=None):
 
 def acpi_tables(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return acpi_tables information from osquery
 
     CLI Example:
@@ -274,8 +260,6 @@ def acpi_tables(attrs=None, where=None):
 
 def arp_cache(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return arp_cache information from osquery
 
     CLI Example:
@@ -289,8 +273,6 @@ def arp_cache(attrs=None, where=None):
 
 def block_devices(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return block_devices information from osquery
 
     CLI Example:
@@ -304,8 +286,6 @@ def block_devices(attrs=None, where=None):
 
 def cpuid(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return cpuid information from osquery
 
     CLI Example:
@@ -319,8 +299,6 @@ def cpuid(attrs=None, where=None):
 
 def crontab(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return crontab information from osquery
 
     CLI Example:
@@ -334,8 +312,6 @@ def crontab(attrs=None, where=None):
 
 def etc_hosts(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return etc_hosts information from osquery
 
     CLI Example:
@@ -362,8 +338,6 @@ def etc_services(attrs=None, where=None):
 
 def file_changes(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return file_changes information from osquery
 
     CLI Example:
@@ -377,8 +351,6 @@ def file_changes(attrs=None, where=None):
 
 def groups(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return groups information from osquery
 
     CLI Example:
@@ -392,8 +364,6 @@ def groups(attrs=None, where=None):
 
 def hardware_events(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return hardware_events information from osquery
 
     CLI Example:
@@ -407,8 +377,6 @@ def hardware_events(attrs=None, where=None):
 
 def interface_addresses(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return interface_addresses information from osquery
 
     CLI Example:
@@ -422,8 +390,6 @@ def interface_addresses(attrs=None, where=None):
 
 def interface_details(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return interface_details information from osquery
 
     CLI Example:
@@ -437,8 +403,6 @@ def interface_details(attrs=None, where=None):
 
 def kernel_info(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return kernel_info information from osquery
 
     CLI Example:
@@ -452,8 +416,6 @@ def kernel_info(attrs=None, where=None):
 
 def last(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return last information from osquery
 
     CLI Example:
@@ -466,10 +428,8 @@ def last(attrs=None, where=None):
 
 
 def listening_ports(attrs=None, where=None):
-    '''
-    .. versionadded:: Beryllium
-
-    Return listening_ports_ information from osquery
+    r'''
+    Return listening_ports information from osquery
 
     CLI Example:
 
@@ -481,10 +441,8 @@ def listening_ports(attrs=None, where=None):
 
 
 def logged_in_users(attrs=None, where=None):
-    '''
-    .. versionadded:: Beryllium
-
-    Return logged_in_users_ information from osquery
+    r'''
+    Return logged_in_users information from osquery
 
     CLI Example:
 
@@ -496,10 +454,8 @@ def logged_in_users(attrs=None, where=None):
 
 
 def mounts(attrs=None, where=None):
-    '''
-    .. versionadded:: Beryllium
-
-    Return mounts_ information from osquery
+    r'''
+    Return mounts information from osquery
 
     CLI Example:
 
@@ -512,8 +468,6 @@ def mounts(attrs=None, where=None):
 
 def os_version(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return os_version information from osquery
 
     CLI Example:
@@ -527,8 +481,6 @@ def os_version(attrs=None, where=None):
 
 def passwd_changes(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return passwd_changes information from osquery
 
     CLI Example:
@@ -542,8 +494,6 @@ def passwd_changes(attrs=None, where=None):
 
 def pci_devices(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return pci_devices information from osquery
 
     CLI Example:
@@ -557,8 +507,6 @@ def pci_devices(attrs=None, where=None):
 
 def process_envs(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return process_envs information from osquery
 
     CLI Example:
@@ -572,8 +520,6 @@ def process_envs(attrs=None, where=None):
 
 def process_open_files(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return process_open_files information from osquery
 
     CLI Example:
@@ -587,8 +533,6 @@ def process_open_files(attrs=None, where=None):
 
 def process_open_sockets(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return process_open_sockets information from osquery
 
     CLI Example:
@@ -602,8 +546,6 @@ def process_open_sockets(attrs=None, where=None):
 
 def processes(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return processes information from osquery
 
     CLI Example:
@@ -617,8 +559,6 @@ def processes(attrs=None, where=None):
 
 def routes(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return routes information from osquery
 
     CLI Example:
@@ -632,8 +572,6 @@ def routes(attrs=None, where=None):
 
 def shell_history(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return shell_history information from osquery
 
     CLI Example:
@@ -647,8 +585,6 @@ def shell_history(attrs=None, where=None):
 
 def smbios_tables(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return smbios_tables information from osquery
 
     CLI Example:
@@ -662,8 +598,6 @@ def smbios_tables(attrs=None, where=None):
 
 def suid_bin(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return suid_bin information from osquery
 
     CLI Example:
@@ -677,8 +611,6 @@ def suid_bin(attrs=None, where=None):
 
 def system_controls(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return system_controls information from osquery
 
     CLI Example:
@@ -692,8 +624,6 @@ def system_controls(attrs=None, where=None):
 
 def usb_devices(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return usb_devices information from osquery
 
     CLI Example:
@@ -707,8 +637,6 @@ def usb_devices(attrs=None, where=None):
 
 def users(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return users information from osquery
 
     CLI Example:
@@ -722,8 +650,6 @@ def users(attrs=None, where=None):
 
 def alf(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return alf information from osquery
 
     CLI Example:
@@ -732,15 +658,13 @@ def alf(attrs=None, where=None):
 
         salt '*' osquery.alf
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='alf', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def alf_exceptions(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return alf_exceptions information from osquery
 
     CLI Example:
@@ -749,15 +673,13 @@ def alf_exceptions(attrs=None, where=None):
 
         salt '*' osquery.alf_exceptions
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='alf_exceptions', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def alf_explicit_auths(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return alf_explicit_auths information from osquery
 
     CLI Example:
@@ -766,15 +688,13 @@ def alf_explicit_auths(attrs=None, where=None):
 
         salt '*' osquery.alf_explicit_auths
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='alf_explicit_auths', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def alf_services(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return alf_services information from osquery
 
     CLI Example:
@@ -783,15 +703,13 @@ def alf_services(attrs=None, where=None):
 
         salt '*' osquery.alf_services
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='alf_services', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def apps(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return apps information from osquery
 
     CLI Example:
@@ -800,15 +718,13 @@ def apps(attrs=None, where=None):
 
         salt '*' osquery.apps
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='apps', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def certificates(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return certificates information from osquery
 
     CLI Example:
@@ -817,15 +733,13 @@ def certificates(attrs=None, where=None):
 
         salt '*' osquery.certificates
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='certificates', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def chrome_extensions(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return chrome_extensions information from osquery
 
     CLI Example:
@@ -834,15 +748,13 @@ def chrome_extensions(attrs=None, where=None):
 
         salt '*' osquery.chrome_extensions
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='chrome_extensions', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def firefox_addons(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return firefox_addons information from osquery
 
     CLI Example:
@@ -851,15 +763,13 @@ def firefox_addons(attrs=None, where=None):
 
         salt '*' osquery.firefox_addons
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='firefox_addons', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def homebrew_packages(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return homebrew_packages information from osquery
 
     CLI Example:
@@ -868,15 +778,13 @@ def homebrew_packages(attrs=None, where=None):
 
         salt '*' osquery.homebrew_packages
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='homebrew_packages', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def iokit_devicetree(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return iokit_devicetree information from osquery
 
     CLI Example:
@@ -885,15 +793,13 @@ def iokit_devicetree(attrs=None, where=None):
 
         salt '*' osquery.iokit_devicetree
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='iokit_devicetree', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def iokit_registry(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return iokit_registry information from osquery
 
     CLI Example:
@@ -902,15 +808,13 @@ def iokit_registry(attrs=None, where=None):
 
         salt '*' osquery.iokit_registry
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='iokit_registry', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def kernel_extensions(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return kernel_extensions information from osquery
 
     CLI Example:
@@ -919,15 +823,13 @@ def kernel_extensions(attrs=None, where=None):
 
         salt '*' osquery.kernel_extensions
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='kernel_extensions', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def keychain_items(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return keychain_items information from osquery
 
     CLI Example:
@@ -936,15 +838,13 @@ def keychain_items(attrs=None, where=None):
 
         salt '*' osquery.keychain_items
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='keychain_items', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def launchd(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return launchd information from osquery
 
     CLI Example:
@@ -953,15 +853,13 @@ def launchd(attrs=None, where=None):
 
         salt '*' osquery.launchd
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='launchd', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def nfs_shares(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return nfs_shares information from osquery
 
     CLI Example:
@@ -970,15 +868,13 @@ def nfs_shares(attrs=None, where=None):
 
         salt '*' osquery.nfs_shares
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='nfs_shares', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def nvram(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return nvram information from osquery
 
     CLI Example:
@@ -987,15 +883,13 @@ def nvram(attrs=None, where=None):
 
         salt '*' osquery.nvram
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='nvram', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def preferences(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return preferences information from osquery
 
     CLI Example:
@@ -1004,15 +898,13 @@ def preferences(attrs=None, where=None):
 
         salt '*' osquery.preferences
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='preferences', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def quarantine(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return quarantine information from osquery
 
     CLI Example:
@@ -1021,15 +913,13 @@ def quarantine(attrs=None, where=None):
 
         salt '*' osquery.quarantine
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='quarantine', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def safari_extensions(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return safari_extensions information from osquery
 
     CLI Example:
@@ -1038,15 +928,13 @@ def safari_extensions(attrs=None, where=None):
 
         salt '*' osquery.safari_extensions
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='safari_extensions', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def startup_items(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return startup_items information from osquery
 
     CLI Example:
@@ -1055,15 +943,13 @@ def startup_items(attrs=None, where=None):
 
         salt '*' osquery.startup_items
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='startup_items', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def xattr_where_from(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return xattr_where_from information from osquery
 
     CLI Example:
@@ -1072,15 +958,13 @@ def xattr_where_from(attrs=None, where=None):
 
         salt '*' osquery.xattr_where_from
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='xattr_where_from', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def xprotect_entries(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return xprotect_entries information from osquery
 
     CLI Example:
@@ -1089,15 +973,13 @@ def xprotect_entries(attrs=None, where=None):
 
         salt '*' osquery.xprotect_entries
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='xprotect_entries', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def xprotect_reports(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return xprotect_reports information from osquery
 
     CLI Example:
@@ -1106,15 +988,13 @@ def xprotect_reports(attrs=None, where=None):
 
         salt '*' osquery.xprotect_reports
     '''
-    if salt.utils.is_darwin():
+    if salt.utils.platform.is_darwin():
         return _osquery_cmd(table='xprotect_reports', attrs=attrs, where=where)
-    return {'result': False, 'comment': 'Only available on OS X systems.'}
+    return {'result': False, 'comment': 'Only available on macOS systems.'}
 
 
 def file_(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return file information from osquery
 
     CLI Example:
@@ -1128,8 +1008,6 @@ def file_(attrs=None, where=None):
 
 def hash_(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return hash information from osquery
 
     CLI Example:
@@ -1143,8 +1021,6 @@ def hash_(attrs=None, where=None):
 
 def osquery_extensions(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return osquery_extensions information from osquery
 
     CLI Example:
@@ -1158,8 +1034,6 @@ def osquery_extensions(attrs=None, where=None):
 
 def osquery_flags(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return osquery_flags information from osquery
 
     CLI Example:
@@ -1173,8 +1047,6 @@ def osquery_flags(attrs=None, where=None):
 
 def osquery_info(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return osquery_info information from osquery
 
     CLI Example:
@@ -1188,8 +1060,6 @@ def osquery_info(attrs=None, where=None):
 
 def osquery_registry(attrs=None, where=None):
     '''
-    .. versionadded:: Beryllium
-
     Return osquery_registry information from osquery
 
     CLI Example:
@@ -1203,8 +1073,6 @@ def osquery_registry(attrs=None, where=None):
 
 def time_(attrs=None):
     '''
-    .. versionadded:: Beryllium
-
     Return time information from osquery
 
     CLI Example:
@@ -1218,8 +1086,6 @@ def time_(attrs=None):
 
 def query(sql=None):
     '''
-    .. versionadded:: Beryllium
-
     Return time information from osquery
 
     CLI Example:

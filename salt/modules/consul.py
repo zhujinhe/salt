@@ -12,28 +12,41 @@ from __future__ import absolute_import
 # Import 3rd-party libs
 # pylint: disable=import-error,no-name-in-module,redefined-builtin
 from salt.ext.six.moves.urllib.parse import urljoin as _urljoin
+import salt.ext.six
 import salt.ext.six.moves.http_client
 # pylint: enable=import-error,no-name-in-module
 
-import base64
+# Import salt libs
+import salt.utils.http
 
-try:
-    import requests
-    from requests.exceptions import ConnectionError
-    ENABLED = True
-except ImportError:
-    ENABLED = False
+import base64
+import json
 
 import logging
 log = logging.getLogger(__name__)
 
+from salt.exceptions import SaltInvocationError
+
+# Don't shadow built-ins.
+__func_alias__ = {
+    'list_': 'list'
+}
+
 __virtualname__ = 'consul'
+
+
+def _get_config():
+    '''
+    Retrieve Consul configuration
+    '''
+    return __salt__['config.get']('consul.url') or \
+        __salt__['config.get']('consul:url')
 
 
 def _query(function,
            consul_url,
-           api_version='v1',
            method='GET',
+           api_version='v1',
            data=None,
            query_params=None):
     '''
@@ -50,43 +63,36 @@ def _query(function,
     if not query_params:
         query_params = {}
 
-    if data is None:
-        data = {}
-
     ret = {'data': '',
            'res': True}
 
     base_url = _urljoin(consul_url, '{0}/'.format(api_version))
     url = _urljoin(base_url, function, False)
 
-    try:
-        result = requests.request(
-            method=method,
-            url=url,
-            headers=headers,
-            params=query_params,
-            data=data,
-            verify=True,
-        )
-    except ConnectionError as e:
-        ret['data'] = e
-        ret['res'] = False
-        return ret
+    if data is None:
+        data = {}
+    data = json.dumps(data)
 
-    if result.status_code == salt.ext.six.moves.http_client.OK:
-        result = result.json()
-        if result:
-            ret['data'] = result
-            ret['res'] = True
-        else:
-            ret['res'] = False
-    elif result.status_code == salt.ext.six.moves.http_client.NO_CONTENT:
+    result = salt.utils.http.query(
+        url,
+        method=method,
+        params=query_params,
+        data=data,
+        decode=True,
+        status=True,
+        header_dict=headers,
+        opts=__opts__,
+    )
+
+    if result.get('status', None) == salt.ext.six.moves.http_client.OK:
+        ret['data'] = result.get('dict', result)
+        ret['res'] = True
+    elif result.get('status', None) == salt.ext.six.moves.http_client.NO_CONTENT:
         ret['res'] = False
-    elif result.status_code == salt.ext.six.moves.http_client.NOT_FOUND:
+    elif result.get('status', None) == salt.ext.six.moves.http_client.NOT_FOUND:
         ret['data'] = 'Key not found.'
         ret['res'] = False
     else:
-        result = result.json()
         if result:
             ret['data'] = result
             ret['res'] = True
@@ -95,7 +101,7 @@ def _query(function,
     return ret
 
 
-def list(consul_url, key=None, **kwargs):
+def list_(consul_url=None, key=None, **kwargs):
     '''
     List keys in Consul
 
@@ -114,11 +120,8 @@ def list(consul_url, key=None, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -144,7 +147,7 @@ def list(consul_url, key=None, **kwargs):
     return ret
 
 
-def get(consul_url, key, recurse=False, decode=False, raw=False):
+def get(consul_url=None, key=None, recurse=False, decode=False, raw=False):
     '''
     Get key from Consul
 
@@ -166,26 +169,28 @@ def get(consul_url, key, recurse=False, decode=False, raw=False):
 
         salt '*' consul.list key='web' recurse='True' decode='True'
 
-        By default values stored in Consul are base64 encoded, passing the
-        decode option will show them as the decoded values.
+    By default values stored in Consul are base64 encoded, passing the
+    decode option will show them as the decoded values.
+
+    .. code-block:: bash
 
         salt '*' consul.list key='web' recurse='True' decode='True' raw='True'
 
-        By default Consult will return other information about the key, the raw
-        option will return only the raw value.
+    By default Consult will return other information about the key, the raw
+    option will return only the raw value.
 
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not key:
+        raise SaltInvocationError('Required argument "key" is missing.')
 
     query_params = {}
     function = 'kv/{0}'.format(key)
@@ -200,11 +205,15 @@ def get(consul_url, key, recurse=False, decode=False, raw=False):
     if ret['res']:
         if decode:
             for item in ret['data']:
-                item['Value'] = base64.b64decode(item['Value'])
+                if item['Value'] != None:
+                    item['Value'] = base64.b64decode(item['Value'])
+                else:
+                    item['Value'] = ""
+
     return ret
 
 
-def put(consul_url, key, value, **kwargs):
+def put(consul_url=None, key=None, value=None, **kwargs):
     '''
     Put values into Consul
 
@@ -237,15 +246,23 @@ def put(consul_url, key, value, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not key:
+        raise SaltInvocationError('Required argument "key" is missing.')
+
+    # Invalid to specified these together
+    conflicting_args = ['cas', 'release', 'acquire']
+    for _l1 in conflicting_args:
+        for _l2 in conflicting_args:
+            if _l1 in kwargs and _l2 in kwargs and _l1 != _l2:
+                raise SaltInvocationError('Using arguments `{0}` and `{1}`'
+                                          ' together is invalid.'.format(_l1, _l2))
 
     query_params = {}
 
@@ -253,7 +270,7 @@ def put(consul_url, key, value, **kwargs):
     _current = get(consul_url=consul_url, key=key)
 
     if 'flags' in kwargs:
-        if not kwargs['flags'] >= 0 and not kwargs['flags'] <= 2**64:
+        if kwargs['flags'] >= 0 and kwargs['flags'] <= 2**64:
             query_params['flags'] = kwargs['flags']
 
     if 'cas' in kwargs:
@@ -275,8 +292,6 @@ def put(consul_url, key, value, **kwargs):
                               'CAS argument can not be used.'.format(key))
             ret['res'] = False
             return ret
-    else:
-        log.error('Key {0} does not exist. Skipping release.')
 
     if 'acquire' in kwargs:
         if kwargs['acquire'] not in available_sessions:
@@ -304,11 +319,13 @@ def put(consul_url, key, value, **kwargs):
 
     data = value
     function = 'kv/{0}'.format(key)
+    method = 'PUT'
     ret = _query(consul_url=consul_url,
                  function=function,
-                 method='PUT',
+                 method=method,
                  data=data,
                  query_params=query_params)
+
     if ret['res']:
         ret['res'] = True
         ret['data'] = 'Added key {0} with value {1}.'.format(key, value)
@@ -318,7 +335,7 @@ def put(consul_url, key, value, **kwargs):
     return ret
 
 
-def delete(consul_url, key, **kwargs):
+def delete(consul_url=None, key=None, **kwargs):
     '''
     Delete values from Consul
 
@@ -340,15 +357,15 @@ def delete(consul_url, key, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not key:
+        raise SaltInvocationError('Required argument "key" is missing.')
 
     query_params = {}
 
@@ -379,7 +396,7 @@ def delete(consul_url, key, **kwargs):
     return ret
 
 
-def agent_checks(consul_url):
+def agent_checks(consul_url=None):
     '''
     Returns the checks the local agent is managing
 
@@ -395,11 +412,8 @@ def agent_checks(consul_url):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -412,7 +426,7 @@ def agent_checks(consul_url):
     return ret
 
 
-def agent_services(consul_url):
+def agent_services(consul_url=None):
     '''
     Returns the services the local agent is managing
 
@@ -428,11 +442,8 @@ def agent_services(consul_url):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -445,7 +456,7 @@ def agent_services(consul_url):
     return ret
 
 
-def agent_members(consul_url, **kwargs):
+def agent_members(consul_url=None, **kwargs):
     '''
     Returns the members as seen by the local serf agent
 
@@ -462,11 +473,8 @@ def agent_members(consul_url, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -483,7 +491,7 @@ def agent_members(consul_url, **kwargs):
     return ret
 
 
-def agent_self(consul_url):
+def agent_self(consul_url=None):
     '''
     Returns the local node configuration
 
@@ -500,11 +508,8 @@ def agent_self(consul_url):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -518,7 +523,7 @@ def agent_self(consul_url):
     return ret
 
 
-def agent_maintenance(consul_url, **kwargs):
+def agent_maintenance(consul_url=None, **kwargs):
     '''
     Manages node maintenance mode
 
@@ -542,11 +547,8 @@ def agent_maintenance(consul_url, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -565,7 +567,7 @@ def agent_maintenance(consul_url, **kwargs):
     function = 'agent/maintenance'
     res = _query(consul_url=consul_url,
                  function=function,
-                 method='GET',
+                 method='PUT',
                  query_params=query_params)
     if res['res']:
         ret['res'] = True
@@ -577,7 +579,7 @@ def agent_maintenance(consul_url, **kwargs):
     return ret
 
 
-def agent_join(consul_url, address, **kwargs):
+def agent_join(consul_url=None, address=None, **kwargs):
     '''
     Triggers the local agent to join a node
 
@@ -596,15 +598,15 @@ def agent_join(consul_url, address, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not address:
+        raise SaltInvocationError('Required argument "address" is missing.')
 
     if 'wan' in kwargs:
         query_params['wan'] = kwargs['wan']
@@ -616,15 +618,14 @@ def agent_join(consul_url, address, **kwargs):
                  query_params=query_params)
     if res['res']:
         ret['res'] = True
-        ret['message'] = ('Agent maintenance mode '
-                          '{0}ed.'.format(kwargs['enable']))
+        ret['message'] = 'Agent joined the cluster'
     else:
         ret['res'] = False
-        ret['message'] = 'Unable to change maintenance mode for agent.'
+        ret['message'] = 'Unable to join the cluster.'
     return ret
 
 
-def agent_leave(consul_url, node):
+def agent_leave(consul_url=None, node=None):
     '''
     Used to instruct the agent to force a node into the left state.
 
@@ -642,15 +643,15 @@ def agent_leave(consul_url, node):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not node:
+        raise SaltInvocationError('Required argument "node" is missing.')
 
     function = 'agent/force-leave/{0}'.format(node)
     res = _query(consul_url=consul_url,
@@ -666,7 +667,7 @@ def agent_leave(consul_url, node):
     return ret
 
 
-def agent_check_register(consul_url, **kwargs):
+def agent_check_register(consul_url=None, **kwargs):
     '''
     The register endpoint is used to add a new check to the local agent.
 
@@ -697,11 +698,8 @@ def agent_check_register(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -710,9 +708,7 @@ def agent_check_register(consul_url, **kwargs):
     if 'name' in kwargs:
         data['Name'] = kwargs['name']
     else:
-        ret['message'] = 'Required parameter "name" is missing.'
-        ret['res'] = False
-        return ret
+        raise SaltInvocationError('Required argument "name" is missing.')
 
     if True not in [True for item in ('script', 'http') if item in kwargs]:
         ret['message'] = 'Required parameter "script" or "http" is missing.'
@@ -755,7 +751,7 @@ def agent_check_register(consul_url, **kwargs):
     return ret
 
 
-def agent_check_deregister(consul_url, checkid):
+def agent_check_deregister(consul_url=None, checkid=None):
     '''
     The agent will take care of deregistering the check from the Catalog.
 
@@ -767,21 +763,20 @@ def agent_check_deregister(consul_url, checkid):
 
     .. code-block:: bash
 
-        salt '*' consul.agent_check_register name='Memory Utilization'
-                script='/usr/local/bin/check_mem.py' interval='15s'
+        salt '*' consul.agent_check_deregister checkid='Memory Utilization'
 
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not checkid:
+        raise SaltInvocationError('Required argument "checkid" is missing.')
 
     function = 'agent/check/deregister/{0}'.format(checkid)
     res = _query(consul_url=consul_url,
@@ -796,7 +791,7 @@ def agent_check_deregister(consul_url, checkid):
     return ret
 
 
-def agent_check_pass(consul_url, checkid, **kwargs):
+def agent_check_pass(consul_url=None, checkid=None, **kwargs):
     '''
     This endpoint is used with a check that is of the TTL type. When this
     is called, the status of the check is set to passing and the TTL
@@ -818,15 +813,15 @@ def agent_check_pass(consul_url, checkid, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not checkid:
+        raise SaltInvocationError('Required argument "checkid" is missing.')
 
     if 'note' in kwargs:
         query_params['note'] = kwargs['note']
@@ -845,7 +840,7 @@ def agent_check_pass(consul_url, checkid, **kwargs):
     return ret
 
 
-def agent_check_warn(consul_url, checkid, **kwargs):
+def agent_check_warn(consul_url=None, checkid=None, **kwargs):
     '''
     This endpoint is used with a check that is of the TTL type. When this
     is called, the status of the check is set to warning and the TTL
@@ -867,15 +862,15 @@ def agent_check_warn(consul_url, checkid, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not checkid:
+        raise SaltInvocationError('Required argument "checkid" is missing.')
 
     if 'note' in kwargs:
         query_params['note'] = kwargs['note']
@@ -894,7 +889,7 @@ def agent_check_warn(consul_url, checkid, **kwargs):
     return ret
 
 
-def agent_check_fail(consul_url, checkid, **kwargs):
+def agent_check_fail(consul_url=None, checkid=None, **kwargs):
     '''
     This endpoint is used with a check that is of the TTL type. When this
     is called, the status of the check is set to critical and the
@@ -916,15 +911,15 @@ def agent_check_fail(consul_url, checkid, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not checkid:
+        raise SaltInvocationError('Required argument "checkid" is missing.')
 
     if 'note' in kwargs:
         query_params['note'] = kwargs['note']
@@ -943,7 +938,7 @@ def agent_check_fail(consul_url, checkid, **kwargs):
     return ret
 
 
-def agent_service_register(consul_url, **kwargs):
+def agent_service_register(consul_url=None, **kwargs):
     '''
     The used to add a new service, with an optional
     health check, to the local agent.
@@ -980,56 +975,69 @@ def agent_service_register(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
 
-    if 'name' in kwargs:
-        data['Name'] = kwargs['name']
+    lc_kwargs = dict()
+    for k, v in salt.ext.six.iteritems(kwargs):
+        lc_kwargs[k.lower()] = v
 
-    if 'address' in kwargs:
-        data['Address'] = kwargs['address']
+    if 'name' in lc_kwargs:
+        data['Name'] = lc_kwargs['name']
+    else:
+        raise SaltInvocationError('Required argument "name" is missing.')
 
-    if 'port' in kwargs:
-        data['Port'] = kwargs['port']
+    if 'address' in lc_kwargs:
+        data['Address'] = lc_kwargs['address']
 
-    if 'id' in kwargs:
-        data['ID'] = kwargs['id']
+    if 'port' in lc_kwargs:
+        data['Port'] = lc_kwargs['port']
 
-    if 'tags' in kwargs:
-        _tags = kwargs['tags']
+    if 'id' in lc_kwargs:
+        data['ID'] = lc_kwargs['id']
+
+    if 'tags' in lc_kwargs:
+        _tags = lc_kwargs['tags']
         if not isinstance(_tags, list):
             _tags = [_tags]
         data['Tags'] = _tags
 
-    check_elements = ('check_script', 'check_http', 'check_ttl')
-    if True in [True for item in check_elements if item in kwargs]:
-        data['Check'] = {}
+    if 'enabletagoverride' in lc_kwargs:
+        data['EnableTagOverride'] = lc_kwargs['enabletagoverride']
 
-        if 'check_script' in kwargs:
-            if 'interval' not in kwargs:
+    if 'check' in lc_kwargs:
+        dd = dict()
+        for k, v in salt.ext.six.iteritems(lc_kwargs['check']):
+            dd[k.lower()] = v
+        interval_required = False
+        check_dd = dict()
+
+        if 'script' in dd:
+            interval_required = True
+            check_dd['Script'] = dd['script']
+        if 'http' in dd:
+            interval_required = True
+            check_dd['HTTP'] = dd['http']
+        if 'ttl' in dd:
+            check_dd['TTL'] = dd['ttl']
+        if 'interval' in dd:
+            check_dd['Interval'] = dd['interval']
+
+        if interval_required:
+            if 'Interval' not in check_dd:
                 ret['message'] = 'Required parameter "interval" is missing.'
                 ret['res'] = False
                 return ret
-            data['Check']['Script'] = kwargs['check_script']
-            data['Check']['Interval'] = kwargs['check_interval']
+        else:
+            if 'Interval' in check_dd:
+                del check_dd['Interval']  # not required, so ignore it
 
-        if 'check_ttl' in kwargs:
-            data['Check']['TTL'] = kwargs['check_ttl']
-
-        if 'check_http' in kwargs:
-            if 'interval' not in kwargs:
-                ret['message'] = 'Required parameter "interval" is missing.'
-                ret['res'] = False
-                return ret
-            data['Check']['HTTP'] = kwargs['check_http']
-            data['Check']['Interval'] = kwargs['check_interval']
+        if len(check_dd) > 0:
+            data['Check'] = check_dd  # if empty, ignore it
 
     function = 'agent/service/register'
     res = _query(consul_url=consul_url,
@@ -1045,12 +1053,12 @@ def agent_service_register(consul_url, **kwargs):
     return ret
 
 
-def agent_service_deregister(consul_url, serviceid):
+def agent_service_deregister(consul_url=None, serviceid=None):
     '''
     Used to remove a service.
 
     :param consul_url: The Consul server URL.
-    :param name: A name describing the service.
+    :param serviceid: A serviceid describing the service.
     :return: Boolean and message indicating success or failure.
 
     CLI Example:
@@ -1063,15 +1071,15 @@ def agent_service_deregister(consul_url, serviceid):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not serviceid:
+        raise SaltInvocationError('Required argument "serviceid" is missing.')
 
     function = 'agent/service/deregister/{0}'.format(serviceid)
     res = _query(consul_url=consul_url,
@@ -1087,7 +1095,7 @@ def agent_service_deregister(consul_url, serviceid):
     return ret
 
 
-def agent_service_maintenance(consul_url, serviceid, **kwargs):
+def agent_service_maintenance(consul_url=None, serviceid=None, **kwargs):
     '''
     Used to place a service into maintenance mode.
 
@@ -1109,15 +1117,15 @@ def agent_service_maintenance(consul_url, serviceid, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not serviceid:
+        raise SaltInvocationError('Required argument "serviceid" is missing.')
 
     if 'enable' in kwargs:
         query_params['enable'] = kwargs['enable']
@@ -1145,7 +1153,7 @@ def agent_service_maintenance(consul_url, serviceid, **kwargs):
     return ret
 
 
-def session_create(consul_url, **kwargs):
+def session_create(consul_url=None, **kwargs):
     '''
     Used to create a session.
 
@@ -1179,11 +1187,8 @@ def session_create(consul_url, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1198,6 +1203,8 @@ def session_create(consul_url, **kwargs):
 
     if 'name' in kwargs:
         data['Name'] = kwargs['name']
+    else:
+        raise SaltInvocationError('Required argument "name" is missing.')
 
     if 'checks' in kwargs:
         data['Touch'] = kwargs['touch']
@@ -1215,7 +1222,7 @@ def session_create(consul_url, **kwargs):
         if str(_ttl).endswith('s'):
             _ttl = _ttl[:-1]
 
-        if not int(_ttl) >= 0 and not int(_ttl) <= 3600:
+        if int(_ttl) < 0 or int(_ttl) > 3600:
             ret['message'] = ('TTL must be ',
                               'between 0 and 3600.')
             ret['res'] = False
@@ -1237,7 +1244,7 @@ def session_create(consul_url, **kwargs):
     return ret
 
 
-def session_list(consul_url, return_list=False, **kwargs):
+def session_list(consul_url=None, return_list=False, **kwargs):
     '''
     Used to list sessions.
 
@@ -1258,11 +1265,8 @@ def session_list(consul_url, return_list=False, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1286,7 +1290,7 @@ def session_list(consul_url, return_list=False, **kwargs):
     return ret
 
 
-def session_destroy(consul_url, session, **kwargs):
+def session_destroy(consul_url=None, session=None, **kwargs):
     '''
     Destroy session
 
@@ -1305,15 +1309,15 @@ def session_destroy(consul_url, session, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not session:
+        raise SaltInvocationError('Required argument "session" is missing.')
 
     query_params = {}
 
@@ -1333,7 +1337,7 @@ def session_destroy(consul_url, session, **kwargs):
     return ret
 
 
-def session_info(consul_url, session, **kwargs):
+def session_info(consul_url=None, session=None, **kwargs):
     '''
     Information about a session
 
@@ -1352,15 +1356,15 @@ def session_info(consul_url, session, **kwargs):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not session:
+        raise SaltInvocationError('Required argument "session" is missing.')
 
     query_params = {}
 
@@ -1374,7 +1378,7 @@ def session_info(consul_url, session, **kwargs):
     return ret
 
 
-def catalog_register(consul_url, **kwargs):
+def catalog_register(consul_url=None, **kwargs):
     '''
     Registers a new node, service, or check
 
@@ -1409,11 +1413,8 @@ def catalog_register(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1483,15 +1484,15 @@ def catalog_register(consul_url, **kwargs):
     if res['res']:
         ret['res'] = True
         ret['message'] = ('Catalog registration '
-                          'for {0} successful.'.format(kwargs['name']))
+                          'for {0} successful.'.format(kwargs['node']))
     else:
         ret['res'] = False
         ret['message'] = ('Catalog registration '
-                          'for {0} failed.'.format(kwargs['name']))
+                          'for {0} failed.'.format(kwargs['node']))
     return ret
 
 
-def catalog_deregister(consul_url, **kwargs):
+def catalog_deregister(consul_url=None, **kwargs):
     '''
     Deregisters a node, service, or check
 
@@ -1514,11 +1515,8 @@ def catalog_deregister(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1547,15 +1545,15 @@ def catalog_deregister(consul_url, **kwargs):
                  data=data)
     if res['res']:
         ret['res'] = True
-        ret['message'] = 'Catalog item {0} removed.'.format(kwargs['name'])
+        ret['message'] = 'Catalog item {0} removed.'.format(kwargs['node'])
     else:
         ret['res'] = False
         ret['message'] = ('Removing Catalog '
-                          'item {0} failed.'.format(kwargs['name']))
+                          'item {0} failed.'.format(kwargs['node']))
     return ret
 
 
-def catalog_datacenters(consul_url):
+def catalog_datacenters(consul_url=None):
     '''
     Return list of available datacenters from catalog.
 
@@ -1571,11 +1569,8 @@ def catalog_datacenters(consul_url):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1587,7 +1582,7 @@ def catalog_datacenters(consul_url):
     return ret
 
 
-def catalog_nodes(consul_url, **kwargs):
+def catalog_nodes(consul_url=None, **kwargs):
     '''
     Return list of available nodes from catalog.
 
@@ -1606,11 +1601,8 @@ def catalog_nodes(consul_url, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1626,7 +1618,7 @@ def catalog_nodes(consul_url, **kwargs):
     return ret
 
 
-def catalog_services(consul_url, **kwargs):
+def catalog_services(consul_url=None, **kwargs):
     '''
     Return list of available services rom catalog.
 
@@ -1645,11 +1637,8 @@ def catalog_services(consul_url, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1665,7 +1654,7 @@ def catalog_services(consul_url, **kwargs):
     return ret
 
 
-def catalog_service(consul_url, service, **kwargs):
+def catalog_service(consul_url=None, service=None, **kwargs):
     '''
     Information about the registered service.
 
@@ -1685,15 +1674,15 @@ def catalog_service(consul_url, service, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not service:
+        raise SaltInvocationError('Required argument "service" is missing.')
 
     if 'dc' in kwargs:
         query_params['dc'] = kwargs['dc']
@@ -1708,7 +1697,7 @@ def catalog_service(consul_url, service, **kwargs):
     return ret
 
 
-def catalog_node(consul_url, node, **kwargs):
+def catalog_node(consul_url=None, node=None, **kwargs):
     '''
     Information about the registered node.
 
@@ -1728,15 +1717,15 @@ def catalog_node(consul_url, node, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not node:
+        raise SaltInvocationError('Required argument "node" is missing.')
 
     if 'dc' in kwargs:
         query_params['dc'] = kwargs['dc']
@@ -1748,7 +1737,7 @@ def catalog_node(consul_url, node, **kwargs):
     return ret
 
 
-def health_node(consul_url, node, **kwargs):
+def health_node(consul_url=None, node=None, **kwargs):
     '''
     Health information about the registered node.
 
@@ -1768,15 +1757,15 @@ def health_node(consul_url, node, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not node:
+        raise SaltInvocationError('Required argument "node" is missing.')
 
     if 'dc' in kwargs:
         query_params['dc'] = kwargs['dc']
@@ -1788,7 +1777,7 @@ def health_node(consul_url, node, **kwargs):
     return ret
 
 
-def health_checks(consul_url, service, **kwargs):
+def health_checks(consul_url=None, service=None, **kwargs):
     '''
     Health information about the registered service.
 
@@ -1808,15 +1797,15 @@ def health_checks(consul_url, service, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not service:
+        raise SaltInvocationError('Required argument "service" is missing.')
 
     if 'dc' in kwargs:
         query_params['dc'] = kwargs['dc']
@@ -1828,7 +1817,7 @@ def health_checks(consul_url, service, **kwargs):
     return ret
 
 
-def health_service(consul_url, service, **kwargs):
+def health_service(consul_url=None, service=None, **kwargs):
     '''
     Health information about the registered service.
 
@@ -1853,15 +1842,15 @@ def health_service(consul_url, service, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not service:
+        raise SaltInvocationError('Required argument "service" is missing.')
 
     if 'dc' in kwargs:
         query_params['dc'] = kwargs['dc']
@@ -1879,7 +1868,7 @@ def health_service(consul_url, service, **kwargs):
     return ret
 
 
-def health_state(consul_url, state, **kwargs):
+def health_state(consul_url=None, state=None, **kwargs):
     '''
     Returns the checks in the state provided on the path.
 
@@ -1896,23 +1885,23 @@ def health_state(consul_url, state, **kwargs):
 
     .. code-block:: bash
 
-        salt '*' consul.health_service service='redis1'
+        salt '*' consul.health_state state='redis1'
 
-        salt '*' consul.health_service service='redis1' passing='True'
+        salt '*' consul.health_state service='redis1' passing='True'
 
     '''
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
+
+    if not state:
+        raise SaltInvocationError('Required argument "state" is missing.')
 
     if 'dc' in kwargs:
         query_params['dc'] = kwargs['dc']
@@ -1929,7 +1918,7 @@ def health_state(consul_url, state, **kwargs):
     return ret
 
 
-def status_leader(consul_url):
+def status_leader(consul_url=None):
     '''
     Returns the current Raft leader
 
@@ -1945,11 +1934,8 @@ def status_leader(consul_url):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1978,11 +1964,8 @@ def status_peers(consul_url):
     '''
     ret = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -1994,11 +1977,13 @@ def status_peers(consul_url):
     return ret
 
 
-def acl_create(consul_url, **kwargs):
+def acl_create(consul_url=None, **kwargs):
     '''
     Create a new ACL token.
 
     :param consul_url: The Consul server URL.
+    :param id: Unique identifier for the ACL to create
+               leave it blank to let consul server generate one
     :param name: Meaningful indicator of the ACL's purpose.
     :param type: Type is either client or management. A management
                  token is comparable to a root user and has the
@@ -2017,11 +2002,8 @@ def acl_create(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -2029,6 +2011,11 @@ def acl_create(consul_url, **kwargs):
 
     if 'name' in kwargs:
         data['Name'] = kwargs['name']
+    else:
+        raise SaltInvocationError('Required argument "name" is missing.')
+
+    if 'id' in kwargs:
+        data['ID'] = kwargs['id']
 
     if 'type' in kwargs:
         data['Type'] = kwargs['type']
@@ -2052,7 +2039,7 @@ def acl_create(consul_url, **kwargs):
     return ret
 
 
-def acl_update(consul_url, **kwargs):
+def acl_update(consul_url=None, **kwargs):
     '''
     Update an ACL token.
 
@@ -2076,11 +2063,8 @@ def acl_update(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -2089,12 +2073,14 @@ def acl_update(consul_url, **kwargs):
     if 'id' in kwargs:
         data['ID'] = kwargs['id']
     else:
-        ret['message'] = 'Required paramter "id" is missing.'
+        ret['message'] = 'Required parameter "id" is missing.'
         ret['res'] = False
         return ret
 
     if 'name' in kwargs:
         data['Name'] = kwargs['name']
+    else:
+        raise SaltInvocationError('Required argument "name" is missing.')
 
     if 'type' in kwargs:
         data['Type'] = kwargs['type']
@@ -2119,7 +2105,7 @@ def acl_update(consul_url, **kwargs):
     return ret
 
 
-def acl_delete(consul_url, **kwargs):
+def acl_delete(consul_url=None, **kwargs):
     '''
     Delete an ACL token.
 
@@ -2137,22 +2123,19 @@ def acl_delete(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
 
     if 'id' not in kwargs:
-        ret['message'] = 'Required paramter "id" is missing.'
+        ret['message'] = 'Required parameter "id" is missing.'
         ret['res'] = False
         return ret
 
-    function = 'acl/delete/{0}'.format(kwargs['id'])
+    function = 'acl/destroy/{0}'.format(kwargs['id'])
     res = _query(consul_url=consul_url,
                  data=data,
                  method='PUT',
@@ -2169,7 +2152,7 @@ def acl_delete(consul_url, **kwargs):
     return ret
 
 
-def acl_info(consul_url, **kwargs):
+def acl_info(consul_url=None, **kwargs):
     '''
     Information about an ACL token.
 
@@ -2187,18 +2170,15 @@ def acl_info(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
 
     if 'id' not in kwargs:
-        ret['message'] = 'Required paramter "id" is missing.'
+        ret['message'] = 'Required parameter "id" is missing.'
         ret['res'] = False
         return ret
 
@@ -2210,7 +2190,7 @@ def acl_info(consul_url, **kwargs):
     return ret
 
 
-def acl_clone(consul_url, **kwargs):
+def acl_clone(consul_url=None, **kwargs):
     '''
     Information about an ACL token.
 
@@ -2229,18 +2209,15 @@ def acl_clone(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
 
     if 'id' not in kwargs:
-        ret['message'] = 'Required paramter "id" is missing.'
+        ret['message'] = 'Required parameter "id" is missing.'
         ret['res'] = False
         return ret
 
@@ -2260,7 +2237,7 @@ def acl_clone(consul_url, **kwargs):
     return ret
 
 
-def acl_list(consul_url, **kwargs):
+def acl_list(consul_url=None, **kwargs):
     '''
     List the ACL tokens.
 
@@ -2277,18 +2254,15 @@ def acl_list(consul_url, **kwargs):
     ret = {}
     data = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
 
     if 'id' not in kwargs:
-        ret['message'] = 'Required paramter "id" is missing.'
+        ret['message'] = 'Required parameter "id" is missing.'
         ret['res'] = False
         return ret
 
@@ -2300,7 +2274,7 @@ def acl_list(consul_url, **kwargs):
     return ret
 
 
-def event_fire(consul_url, name, **kwargs):
+def event_fire(consul_url=None, name=None, **kwargs):
     '''
     List the ACL tokens.
 
@@ -2323,20 +2297,15 @@ def event_fire(consul_url, name, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
             return ret
 
-    if not 'name':
-        ret['message'] = 'Required paramter "name" is missing.'
-        ret['res'] = False
-        return ret
+    if not name:
+        raise SaltInvocationError('Required argument "name" is missing.')
 
     if 'dc' in kwargs:
         query_params = kwargs['dc']
@@ -2367,7 +2336,7 @@ def event_fire(consul_url, name, **kwargs):
     return ret
 
 
-def event_list(consul_url, **kwargs):
+def event_list(consul_url=None, **kwargs):
     '''
     List the recent events.
 
@@ -2385,11 +2354,8 @@ def event_list(consul_url, **kwargs):
     ret = {}
     query_params = {}
     if not consul_url:
-        try:
-            options = __salt__['config.option']('consul')
-            if not consul_url:
-                consul_url = options.get('url')
-        except (NameError, KeyError, AttributeError):
+        consul_url = _get_config()
+        if not consul_url:
             log.error('No Consul URL found.')
             ret['message'] = 'No Consul URL found.'
             ret['res'] = False
@@ -2397,6 +2363,8 @@ def event_list(consul_url, **kwargs):
 
     if 'name' in kwargs:
         query_params = kwargs['name']
+    else:
+        raise SaltInvocationError('Required argument "name" is missing.')
 
     function = 'event/list/'
     ret = _query(consul_url=consul_url,

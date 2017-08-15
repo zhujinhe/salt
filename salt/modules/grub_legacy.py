@@ -8,7 +8,7 @@ from __future__ import absolute_import
 import os
 
 # Import salt libs
-import salt.utils
+import salt.utils.files
 import salt.utils.decorators as decorators
 from salt.exceptions import CommandExecutionError
 
@@ -22,7 +22,8 @@ def __virtual__():
     '''
     if os.path.exists(_detect_conf()):
         return __virtualname__
-    return False
+    return (False, 'The grub_legacy execution module cannot be loaded: '
+       'the grub config file does not exist in /boot/grub/')
 
 
 @decorators.memoize
@@ -67,7 +68,7 @@ def conf():
     ret = {}
     pos = 0
     try:
-        with salt.utils.fopen(_detect_conf(), 'r') as _fp:
+        with salt.utils.files.fopen(_detect_conf(), 'r') as _fp:
             for line in _fp:
                 if line.startswith('#'):
                     continue

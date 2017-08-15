@@ -11,7 +11,7 @@ from __future__ import absolute_import
 import os
 
 # Import ioflo libs
-from ioflo.base.odicting import odict
+from ioflo.aid.odicting import odict
 
 from ioflo.base.consoling import getConsole
 console = getConsole()
@@ -21,7 +21,7 @@ from raet.keeping import Keep
 
 from salt.key import RaetKey
 
-from salt.utils import kinds
+import salt.utils.kinds as kinds
 
 
 class SaltKeep(Keep):

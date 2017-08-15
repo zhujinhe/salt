@@ -10,8 +10,11 @@ import logging
 import re
 
 # Import salt libs
-import salt.utils
+import salt.utils.path
 from salt.exceptions import CommandExecutionError, SaltInvocationError
+
+# Import 3rd-party libs
+from salt.ext import six
 
 # Set up logger
 log = logging.getLogger(__name__)
@@ -31,9 +34,9 @@ def __virtual__():
     mdadm provides raid functions for Linux
     '''
     if __grains__['kernel'] != 'Linux':
-        return False
-    if not salt.utils.which('mdadm'):
-        return False
+        return (False, 'The mdadm execution module cannot be loaded: only available on Linux.')
+    if not salt.utils.path.which('mdadm'):
+        return (False, 'The mdadm execution module cannot be loaded: the mdadm binary is not in the path.')
     return __virtualname__
 
 
@@ -271,7 +274,7 @@ def save_config():
         salt '*' raid.save_config
 
     '''
-    scan = __salt__['cmd.run']('mdadm --detail --scan', python_shell=False).split()
+    scan = __salt__['cmd.run']('mdadm --detail --scan', python_shell=False).splitlines()
     # Issue with mdadm and ubuntu
     # REF: http://askubuntu.com/questions/209702/why-is-my-raid-dev-md1-showing-up-as-dev-md126-is-mdadm-conf-being-ignored
     if __grains__['os'] == 'Ubuntu':
@@ -290,12 +293,15 @@ def save_config():
     try:
         vol_d = dict([(line.split()[1], line) for line in scan])
         for vol in vol_d:
-            pattern = r'^ARRAY\s+{0}'.format(re.escape(vol))
+            pattern = r'^ARRAY\s+{0}.*$'.format(re.escape(vol))
             __salt__['file.replace'](cfg_file, pattern, vol_d[vol], append_if_not_found=True)
     except SaltInvocationError:  # File is missing
         __salt__['file.write'](cfg_file, args=scan)
 
-    return __salt__['cmd.run']('update-initramfs -u')
+    if __grains__.get('os_family') == 'Debian':
+        return __salt__['cmd.run']('update-initramfs -u')
+    elif __grains__.get('os_family') == 'RedHat':
+        return __salt__['cmd.run']('dracut --force')
 
 
 def assemble(name,
@@ -341,10 +347,10 @@ def assemble(name,
                 opts.append(kwargs[key])
 
     # Devices may have been written with a blob:
-    if isinstance(devices, str):
+    if isinstance(devices, six.string_types):
         devices = devices.split(',')
 
-    cmd = ['mdadm', '-A', name, '-v', opts] + devices
+    cmd = ['mdadm', '-A', name, '-v'] + opts + devices
 
     if test_mode is True:
         return cmd

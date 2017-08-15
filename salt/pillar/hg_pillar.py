@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 # Copyright (C) 2014 Floris Bruynooghe <flub@devork.be>
 
-'''
+r'''
 Use remote Mercurial repository as a Pillar source.
 
-.. versionadded:: Beryllium
+.. versionadded:: 2015.8.0
 
 The module depends on the ``hglib`` python module being available.
-This is the same requirement as for hgfs_ so should not pose any extra
+This is the same requirement as for hgfs\_ so should not pose any extra
 hurdles.
 
 This external Pillar source can be configured in the master config file as such:
@@ -27,8 +27,11 @@ import os
 
 # Import Salt Libs
 import salt.pillar
+import salt.utils
+import salt.utils.stringutils
 
 # Import Third Party Libs
+from salt.ext import six
 try:
     import hglib
 except ImportError:
@@ -100,7 +103,10 @@ class Repo(object):
         self.repo_uri = repo_uri
         cachedir = os.path.join(__opts__['cachedir'], 'hg_pillar')
         hash_type = getattr(hashlib, __opts__.get('hash_type', 'md5'))
-        repo_hash = hash_type(repo_uri).hexdigest()
+        if six.PY2:
+            repo_hash = hash_type(repo_uri).hexdigest()
+        else:
+            repo_hash = hash_type(salt.utils.stringutils.to_bytes(repo_uri)).hexdigest()
         self.working_dir = os.path.join(cachedir, repo_hash)
         if not os.path.isdir(self.working_dir):
             self.repo = hglib.clone(repo_uri, self.working_dir)

@@ -24,9 +24,10 @@ import logging
 
 # Import salt libs
 import salt.utils
+import salt.utils.files
 from salt.ext.six import string_types
 from salt.exceptions import SaltInvocationError, CommandExecutionError
-import salt.ext.six as six
+from salt.ext import six
 
 log = logging.getLogger(__name__)
 
@@ -35,17 +36,23 @@ __virtualname__ = 'ports'
 
 
 def __virtual__():
-    return __virtualname__ if __grains__.get('os', '') == 'FreeBSD' else False
+    '''
+    Only runs on FreeBSD systems
+    '''
+    if __grains__['os'] == 'FreeBSD':
+        return __virtualname__
+    return (False, 'The freebsdports execution module cannot be loaded: '
+            'only available on FreeBSD systems.')
 
 
 def _portsnap():
     '''
     Return 'portsnap --interactive' for FreeBSD 10, otherwise 'portsnap'
     '''
-    return 'portsnap{0}'.format(
-        ' --interactive' if float(__grains__['osrelease']) >= 10
-        else ''
-    )
+    ret = ['portsnap']
+    if float(__grains__['osrelease']) >= 10:
+        ret.append('--interactive')
+    return ret
 
 
 def _check_portname(name):
@@ -55,12 +62,12 @@ def _check_portname(name):
     '''
     if not isinstance(name, string_types) or '/' not in name:
         raise SaltInvocationError(
-            'Invalid port name {0!r} (category required)'.format(name)
+            'Invalid port name \'{0}\' (category required)'.format(name)
         )
 
     path = os.path.join('/usr/ports', name)
     if not os.path.isdir(path):
-        raise SaltInvocationError('Path {0!r} does not exist'.format(path))
+        raise SaltInvocationError('Path \'{0}\' does not exist'.format(path))
 
     return path
 
@@ -108,7 +115,7 @@ def _write_options(name, configuration):
                 'Unable to make {0}: {1}'.format(dirname, exc)
             )
 
-    with salt.utils.fopen(os.path.join(dirname, 'options'), 'w') as fp_:
+    with salt.utils.files.fopen(os.path.join(dirname, 'options'), 'w') as fp_:
         sorted_options = list(conf_ptr.keys())
         sorted_options.sort()
         fp_.write(
@@ -164,9 +171,15 @@ def install(name, clean=True):
     old = __salt__['pkg.list_pkgs']()
     if old.get(name.rsplit('/')[-1]):
         deinstall(name)
+    cmd = ['make', 'install']
+    if clean:
+        cmd.append('clean')
+    cmd.append('BATCH=yes')
     result = __salt__['cmd.run_all'](
-        'make install{0} BATCH=yes'.format(' clean' if clean else ''),
-        cwd=portpath, reset_system_locale=False
+        cmd,
+        cwd=portpath,
+        reset_system_locale=False,
+        python_shell=False
     )
     if result['retcode'] != 0:
         __context__['ports.install_error'] = result['stderr']
@@ -195,7 +208,11 @@ def deinstall(name):
     '''
     portpath = _check_portname(name)
     old = __salt__['pkg.list_pkgs']()
-    __salt__['cmd.run']('make deinstall BATCH=yes', cwd=portpath)
+    result = __salt__['cmd.run_all'](
+        ['make', 'deinstall', 'BATCH=yes'],
+        cwd=portpath,
+        python_shell=False
+    )
     __context__.pop('pkg.list_pkgs', None)
     new = __salt__['pkg.list_pkgs']()
     return salt.utils.compare_dicts(old, new)
@@ -215,7 +232,11 @@ def rmconfig(name):
         salt '*' ports.rmconfig security/nmap
     '''
     portpath = _check_portname(name)
-    return __salt__['cmd.run']('make rmconfig', cwd=portpath)
+    return __salt__['cmd.run'](
+        ['make', 'rmconfig'],
+        cwd=portpath,
+        python_shell=False
+    )
 
 
 def showconfig(name, default=False, dict_return=False):
@@ -250,7 +271,11 @@ def showconfig(name, default=False, dict_return=False):
         return default_config
 
     try:
-        result = __salt__['cmd.run_all']('make showconfig', cwd=portpath)
+        result = __salt__['cmd.run_all'](
+            ['make', 'showconfig'],
+            cwd=portpath,
+            python_shell=False
+        )
         output = result['stdout'].splitlines()
         if result['retcode'] != 0:
             error = result['stderr']
@@ -323,7 +348,7 @@ def config(name, reset=False, **kwargs):
 
     if not configuration:
         raise CommandExecutionError(
-            'Unable to get port configuration for {0!r}'.format(name)
+            'Unable to get port configuration for \'{0}\''.format(name)
         )
 
     # Get top-level key for later reference
@@ -379,7 +404,10 @@ def update(extract=False):
 
         salt '*' ports.update
     '''
-    result = __salt__['cmd.run_all']('{0} fetch'.format(_portsnap()))
+    result = __salt__['cmd.run_all'](
+        _portsnap() + ['fetch'],
+        python_shell=False
+    )
     if not result['retcode'] == 0:
         raise CommandExecutionError(
             'Unable to fetch ports snapshot: {0}'.format(result['stderr'])
@@ -404,13 +432,19 @@ def update(extract=False):
     ret.append('Fetched {0} new ports or files'.format(new_port_count))
 
     if extract:
-        result = __salt__['cmd.run_all']('{0} extract'.format(_portsnap()))
+        result = __salt__['cmd.run_all'](
+            _portsnap() + ['extract'],
+            python_shell=False
+        )
         if not result['retcode'] == 0:
             raise CommandExecutionError(
                 'Unable to extract ports snapshot {0}'.format(result['stderr'])
             )
 
-    result = __salt__['cmd.run_all']('{0} update'.format(_portsnap()))
+    result = __salt__['cmd.run_all'](
+        _portsnap() + ['update'],
+        python_shell=False
+    )
     if not result['retcode'] == 0:
         raise CommandExecutionError(
             'Unable to apply ports snapshot: {0}'.format(result['stderr'])
@@ -466,7 +500,7 @@ def search(name):
     if '/' in name:
         if name.count('/') > 1:
             raise SaltInvocationError(
-                'Invalid search string {0!r}. Port names cannot have more '
+                'Invalid search string \'{0}\'. Port names cannot have more '
                 'than one slash'
             )
         else:

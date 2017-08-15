@@ -4,12 +4,12 @@ Module for listing programs that automatically run on startup
 (very alpha...not tested on anything but my Win 7x64)
 '''
 
-# Import python libs
+# Import Python libs
 from __future__ import absolute_import
 import os
 
-# Import salt libs
-import salt.utils
+# Import Salt libs
+import salt.utils.platform
 
 
 # Define a function alias in order not to shadow built-in's
@@ -26,9 +26,26 @@ def __virtual__():
     Only works on Windows systems
     '''
 
-    if salt.utils.is_windows():
+    if salt.utils.platform.is_windows():
         return __virtualname__
-    return False
+    return (False, "Module win_autoruns: module only works on Windows systems")
+
+
+def _get_dirs(user_dir, startup_dir):
+    '''
+    Return a list of startup dirs
+    '''
+    try:
+        users = os.listdir(user_dir)
+    except WindowsError:  # pylint: disable=E0602
+        users = []
+
+    full_dirs = []
+    for user in users:
+        full_dir = os.path.join(user_dir, user, startup_dir)
+        if os.path.exists(full_dir):
+            full_dirs.append(full_dir)
+    return full_dirs
 
 
 def list_():
@@ -48,7 +65,6 @@ def list_():
         'HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /reg:64',
         'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
     ]
-    winver = __grains__['osfullname']
     for key in keys:
         autoruns[key] = []
         cmd = ['reg', 'query', key]
@@ -57,21 +73,18 @@ def list_():
                 autoruns[key].append(line)
 
     # Find autoruns in user's startup folder
-    if '7' in winver:
+    user_dir = 'C:\\Documents and Settings\\'
+    startup_dir = '\\Start Menu\\Programs\\Startup'
+    full_dirs = _get_dirs(user_dir, startup_dir)
+    if not full_dirs:
         user_dir = 'C:\\Users\\'
         startup_dir = '\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup'
-    else:
-        user_dir = 'C:\\Documents and Settings\\'
-        startup_dir = '\\Start Menu\\Programs\\Startup'
+        full_dirs = _get_dirs(user_dir, startup_dir)
 
-    for user in os.listdir(user_dir):
-        try:
-            full_dir = user_dir + user + startup_dir
-            files = os.listdir(full_dir)
-            autoruns[full_dir] = []
-            for afile in files:
-                autoruns[full_dir].append(afile)
-        except Exception:
-            pass
+    for full_dir in full_dirs:
+        files = os.listdir(full_dir)
+        autoruns[full_dir] = []
+        for single_file in files:
+            autoruns[full_dir].append(single_file)
 
     return autoruns

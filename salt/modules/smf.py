@@ -2,10 +2,18 @@
 '''
 Service support for Solaris 10 and 11, should work with other systems
 that use SMF also. (e.g. SmartOS)
+
+.. important::
+    If you feel that Salt should be using this module to manage services on a
+    minion, and it is using a different module (or gives an error similar to
+    *'service.start' is not available*), see :ref:`here
+    <module-provider-override>`.
 '''
 
 # Import Python libs
 from __future__ import absolute_import
+import fnmatch
+import re
 
 __func_alias__ = {
     'reload_': 'reload'
@@ -22,9 +30,9 @@ def __virtual__():
     if 'Solaris' in __grains__['os_family']:
         # Don't let this work on Solaris 9 since SMF doesn't exist on it.
         if __grains__['kernelrelease'] == "5.9":
-            return False
+            return (False, 'The smf execution module failed to load: SMF not available on Solaris 9.')
         return __virtualname__
-    return False
+    return (False, 'The smf execution module failed to load: only available on Solaris.')
 
 
 def _get_enabled_disabled(enabled_prop="true"):
@@ -220,8 +228,20 @@ def reload_(name):
 
 def status(name, sig=None):
     '''
-    Return the status for a service, returns a bool whether the service is
-    running.
+    Return the status for a service.
+    If the name contains globbing, a dict mapping service name to True/False
+    values is returned.
+
+    .. versionchanged:: Oxygen
+        The service name can now be a glob (e.g. ``salt*``)
+
+    Args:
+        name (str): The name of the service to check
+        sig (str): Not implemented
+
+    Returns:
+        bool: True if running, False otherwise
+        dict: Maps service name to True if running, False otherwise
 
     CLI Example:
 
@@ -229,12 +249,19 @@ def status(name, sig=None):
 
         salt '*' service.status <service name>
     '''
-    cmd = '/usr/bin/svcs -H -o STATE {0}'.format(name)
-    line = __salt__['cmd.run'](cmd, python_shell=False)
-    if line == 'online':
-        return True
+    contains_globbing = bool(re.search(r'\*|\?|\[.+\]', name))
+    if contains_globbing:
+        services = fnmatch.filter(get_all(), name)
     else:
-        return False
+        services = [name]
+    results = {}
+    for service in services:
+        cmd = '/usr/bin/svcs -H -o STATE {0}'.format(service)
+        line = __salt__['cmd.run'](cmd, python_shell=False)
+        results[service] = line == 'online'
+    if contains_globbing:
+        return results
+    return results[name]
 
 
 def enable(name, **kwargs):

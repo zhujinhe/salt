@@ -1,3 +1,5 @@
+.. _configuring-salt:
+
 ================
 Configuring Salt
 ================
@@ -25,7 +27,7 @@ interfaces (0.0.0.0). To bind Salt to a specific IP, redefine the
    + interface: 10.0.0.1
 
 After updating the configuration file, restart the Salt master.
-See the :doc:`master configuration reference </ref/configuration/master>`
+See the :ref:`master configuration reference <configuration-salt-master>`
 for more details about other configurable options.
 
 Minion Configuration
@@ -46,8 +48,21 @@ configuration file, typically ``/etc/salt/minion``, as follows:
    + master: 10.0.0.1
 
 After updating the configuration file, restart the Salt minion.
-See the :doc:`minion configuration reference </ref/configuration/minion>`
+See the :ref:`minion configuration reference <configuration-salt-minion>`
 for more details about other configurable options.
+
+Proxy Minion Configuration
+==========================
+
+A proxy minion emulates the behaviour of a regular minion
+and inherits their options.
+
+Similarly, the configuration file is ``/etc/salt/proxy`` and the proxy
+tries to connect to the DNS name "salt".
+
+In addition to the regular minion options,
+there are several proxy-specific - see the
+:ref:`proxy minion configuration reference <configuration-salt-proxy>`.
 
 Running Salt
 ============
@@ -76,8 +91,8 @@ Running Salt
 
         salt-master --log-level=debug
 
-    For information on salt's logging system please see the :doc:`logging
-    document</ref/configuration/logging/index>`.
+    For information on salt's logging system please see the :ref:`logging
+    document<logging>`.
 
 
 .. admonition:: Run as an unprivileged (non-root) user
@@ -95,11 +110,46 @@ Running Salt
     * /var/run/salt
 
     More information about running salt as a non-privileged user can be found
-    :doc:`here </ref/configuration/nonroot>`.
+    :ref:`here <configuration-non-root-user>`.
 
 
-There is also a full :doc:`troubleshooting guide</topics/troubleshooting/index>`
+There is also a full :ref:`troubleshooting guide<troubleshooting>`
 available.
+
+.. _key-identity:
+
+Key Identity
+============
+
+Salt provides commands to validate the identity of your Salt master
+and Salt minions before the initial key exchange. Validating key identity helps
+avoid inadvertently connecting to the wrong Salt master, and helps prevent
+a potential MiTM attack when establishing the initial connection.
+
+Master Key Fingerprint
+----------------------
+
+Print the master key fingerprint by running the following command on the Salt master:
+
+.. code-block:: bash
+
+   salt-key -F master
+
+Copy the ``master.pub`` fingerprint from the *Local Keys* section, and then set this value
+as the :conf_minion:`master_finger` in the minion configuration file. Save the configuration
+file and then restart the Salt minion.
+
+Minion Key Fingerprint
+----------------------
+
+Run the following command on each Salt minion to view the minion key fingerprint:
+
+.. code-block:: bash
+
+   salt-call --local key.finger
+
+Compare this value to the value that is displayed when you run the
+``salt-key --finger <MINION_ID>`` command on the Salt master.
 
 
 Key Management
@@ -143,7 +193,7 @@ The ``salt-key`` command allows for signing keys individually or in bulk. The
 example above, using ``-A`` bulk-accepts all pending keys. To accept keys
 individually use the lowercase of the same option, ``-a keyname``.
 
-.. seealso:: :doc:`salt-key manpage </ref/cli/salt-key>`
+.. seealso:: :ref:`salt-key manpage <salt-key>`
 
 Sending Commands
 ================
@@ -177,7 +227,7 @@ Each of the Minions should send a ``True`` response as shown above.
 What's Next?
 ============
 
-Understanding :doc:`targeting </topics/targeting/index>` is important. From there,
-depending on the way you wish to use Salt, you should also proceed to learn
-about :doc:`States </topics/tutorials/starting_states>` and :doc:`Execution Modules
-</ref/modules/index>`.
+Understanding :ref:`targeting <targeting>` is important. From there, depending
+on the way you wish to use Salt, you should also proceed to learn about
+:ref:`Remote Execution <remote-execution>` and :ref:`Configuration Management
+<configuration-management>`.

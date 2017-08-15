@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 '''
-The default service module, if not otherwise specified salt will fall back
-to this basic module
+If Salt's OS detection does not identify a different virtual service module, the minion will fall back to using this basic module, which simply wraps sysvinit scripts.
 '''
 from __future__ import absolute_import
 
 # Import python libs
 import os
+import fnmatch
+import re
 
 __func_alias__ = {
     'reload_': 'reload'
@@ -33,22 +34,28 @@ def __virtual__():
         'Gentoo',
         'Ubuntu',
         'Debian',
+        'Devuan',
         'Arch',
         'Arch ARM',
         'ALT',
         'SUSE  Enterprise Server',
+        'SUSE',
         'OEL',
         'Linaro',
         'elementary OS',
         'McAfee  OS Server',
-        'Mint'
+        'Void',
+        'Mint',
+        'Raspbian',
+        'XenServer',
+        'Cumulus'
     ))
     if __grains__.get('os', '') in disable:
-        return False
+        return (False, 'Your OS is on the disabled list')
     # Disable on all non-Linux OSes as well
     if __grains__['kernel'] != 'Linux':
-        return False
-    # Suse >=12.0 uses systemd
+        return (False, 'Non Linux OSes are not supported')
+    # SUSE >=12.0 uses systemd
     if __grains__.get('os_family', '') == 'Suse':
         try:
             # osrelease might be in decimal format (e.g. "12.1"), or for
@@ -57,10 +64,36 @@ def __virtual__():
             # number (it'd be so much simpler if it was always "X.Y"...)
             import re
             if int(re.split(r'\D+', __grains__.get('osrelease', ''))[0]) >= 12:
-                return False
+                return (False, 'SUSE version greater than or equal to 12 is not supported')
         except ValueError:
-            return False
+            return (False, 'You are missing the os_family grain')
     return 'service'
+
+
+def run(name, action):
+    '''
+    Run the specified service with an action.
+
+    .. versionadded:: 2015.8.1
+
+    name
+        Service name.
+
+    action
+        Action name (like start,  stop,  reload,  restart).
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' service.run apache2 reload
+        salt '*' service.run postgresql initdb
+    '''
+    cmd = os.path.join(
+        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
+        name
+    ) + ' ' + action
+    return not __salt__['cmd.retcode'](cmd, python_shell=False)
 
 
 def start(name):
@@ -73,11 +106,7 @@ def start(name):
 
         salt '*' service.start <service name>
     '''
-    cmd = os.path.join(
-        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
-        name
-    ) + ' start'
-    return not __salt__['cmd.retcode'](cmd, python_shell=False)
+    return __salt__['service.run'](name, 'start')
 
 
 def stop(name):
@@ -90,11 +119,7 @@ def stop(name):
 
         salt '*' service.stop <service name>
     '''
-    cmd = os.path.join(
-        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
-        name
-    ) + ' stop'
-    return not __salt__['cmd.retcode'](cmd, python_shell=False)
+    return __salt__['service.run'](name, 'stop')
 
 
 def restart(name):
@@ -107,18 +132,25 @@ def restart(name):
 
         salt '*' service.restart <service name>
     '''
-    cmd = os.path.join(
-        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
-        name
-    ) + ' restart'
-    return not __salt__['cmd.retcode'](cmd, python_shell=False)
+    return __salt__['service.run'](name, 'restart')
 
 
 def status(name, sig=None):
     '''
-    Return the status for a service, returns the PID or an empty string if the
-    service is running or not, pass a signature to use to find the service via
-    ps
+    Return the status for a service.
+    If the name contains globbing, a dict mapping service name to PID or empty
+    string is returned.
+
+    .. versionchanged:: Oxygen
+        The service name can now be a glob (e.g. ``salt*``)
+
+    Args:
+        name (str): The name of the service to check
+        sig (str): Signature to use to find the service via ps
+
+    Returns:
+        string: PID if running, empty otherwise
+        dict: Maps service name to PID if running, empty string otherwise
 
     CLI Example:
 
@@ -126,7 +158,20 @@ def status(name, sig=None):
 
         salt '*' service.status <service name> [service signature]
     '''
-    return __salt__['status.pid'](sig if sig else name)
+    if sig:
+        return __salt__['status.pid'](sig)
+
+    contains_globbing = bool(re.search(r'\*|\?|\[.+\]', name))
+    if contains_globbing:
+        services = fnmatch.filter(get_all(), name)
+    else:
+        services = [name]
+    results = {}
+    for service in services:
+        results[service] = __salt__['status.pid'](service)
+    if contains_globbing:
+        return results
+    return results[name]
 
 
 def reload_(name):
@@ -140,11 +185,7 @@ def reload_(name):
 
         salt '*' service.reload <service name>
     '''
-    cmd = os.path.join(
-        _GRAINMAP.get(__grains__.get('os'), '/etc/init.d'),
-        name
-    ) + ' reload'
-    return not __salt__['cmd.retcode'](cmd, python_shell=False)
+    return __salt__['service.run'](name, 'reload')
 
 
 def available(name):

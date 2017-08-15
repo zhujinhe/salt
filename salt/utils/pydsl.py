@@ -93,7 +93,7 @@ from salt.utils import warn_until
 from salt.state import HighState
 
 # Import 3rd-party libs
-import salt.ext.six as six
+from salt.ext import six
 
 
 REQUISITES = set('listen require watch prereq use listen_in require_in watch_in prereq_in use_in onchanges onfail'.split())
@@ -139,14 +139,14 @@ class Sls(object):
         self.options.update(options)
 
     def include(self, *sls_names, **kws):
-        if kws.get('env', None) is not None:
+        if 'env' in kws:
             warn_until(
-                'Boron',
-                'Passing a salt environment should be done using \'saltenv\' '
-                'not \'env\'. This functionality will be removed in Salt Boron.'
-            )
-            # Backwards compatibility
-            kws['saltenv'] = kws.pop('env')
+                'Oxygen',
+                'Parameter \'env\' has been detected in the argument list.  This '
+                'parameter is no longer used and has been replaced by \'saltenv\' '
+                'as of Salt 2016.11.0.  This warning will be removed in Salt Oxygen.'
+                )
+            kws.pop('env')
 
         saltenv = kws.get('saltenv', self.saltenv)
 

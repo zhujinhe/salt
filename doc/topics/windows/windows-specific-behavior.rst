@@ -52,7 +52,7 @@ Follow :issue:`11801` for any changes to this behavior.
 Dealing with various username forms
 ===================================
 Salt does not understand the various forms that Windows usernames can come in,
-e.g. username, mydomain\username, username@mydomain.tld can all refer to the
+e.g. username, mydomain\\username, username@mydomain.tld can all refer to the
 same user. In fact, Salt generally only considers the raw username value, i.e.
 the username without the domain or host information.
 
@@ -81,9 +81,3 @@ levels of symlinks (defaults to 64), an error is always raised.
 
 For some functions, this behavior is different to the behavior on Unix
 platforms. In general, avoid symlink loops on either platform.
-
-
-Modifying security properties (ACLs) on files
-=============================================
-There is no support in Salt for modifying ACLs, and therefore no support for
-changing file permissions, besides modifying the owner/user.

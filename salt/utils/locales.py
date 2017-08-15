@@ -3,13 +3,16 @@
 the locale utils used by salt
 '''
 
+# Import Python libs
 from __future__ import absolute_import
-
 import sys
-import locale
 
-from salt.ext.six import string_types
+# Import Salt libs
+import salt.utils.stringutils
 from salt.utils.decorators import memoize as real_memoize
+
+# Import 3rd-party libs
+from salt.ext import six
 
 
 @real_memoize
@@ -17,20 +20,13 @@ def get_encodings():
     '''
     return a list of string encodings to try
     '''
-    encodings = []
-
-    try:
-        loc_enc = locale.getdefaultlocale()[-1]
-    except (ValueError, IndexError):  # system locale is nonstandard or malformed
-        loc_enc = None
-    if loc_enc:
-        encodings.append(loc_enc)
+    encodings = [__salt_system_encoding__]
 
     try:
         sys_enc = sys.getdefaultencoding()
     except ValueError:  # system encoding is nonstandard or malformed
         sys_enc = None
-    if sys_enc:
+    if sys_enc and sys_enc not in encodings:
         encodings.append(sys_enc)
 
     for enc in ['utf-8', 'latin-1']:
@@ -44,20 +40,29 @@ def sdecode(string_):
     '''
     Since we don't know where a string is coming from and that string will
     need to be safely decoded, this function will attempt to decode the string
-    until if has a working string that does not stack trace
+    until it has a working string that does not stack trace
     '''
-    if not isinstance(string_, string_types):
-        return string_
     encodings = get_encodings()
     for encoding in encodings:
         try:
-            decoded = string_.decode(encoding)
-            # Make sure unicode string ops work
-            u' ' + decoded  # pylint: disable=W0104
+            decoded = salt.utils.stringutils.to_unicode(string_, encoding)
+            if isinstance(decoded, six.string_types):
+                # Make sure unicode string ops work
+                u' ' + decoded  # pylint: disable=W0104
             return decoded
         except UnicodeDecodeError:
             continue
     return string_
+
+
+def sdecode_if_string(value_):
+    '''
+    If the value is a string, run sdecode() on it to ensure it is parsed
+    properly. If it is not a string, return it as-is
+    '''
+    if isinstance(value_, six.string_types):
+        value_ = sdecode(value_)
+    return value_
 
 
 def split_locale(loc):

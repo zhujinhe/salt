@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-from __future__ import print_function
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 import os
 
-from salt.utils import parsers
+import salt.utils.parsers
+from salt.utils.verify import verify_log
 from salt.config import _expand_glob_path
 import salt.cli.caller
+import salt.defaults.exitcodes
 
 
-class SaltCall(parsers.SaltCallOptionParser):
+class SaltCall(salt.utils.parsers.SaltCallOptionParser):
     '''
     Used to locally execute a salt command
     '''
@@ -29,6 +30,11 @@ class SaltCall(parsers.SaltCallOptionParser):
             pillar_root = os.path.abspath(self.options.pillar_root)
             self.config['pillar_roots'] = {'base': _expand_glob_path([pillar_root])}
 
+        if self.options.states_dir:
+            # check if the argument is pointing to a file on disk
+            states_dir = os.path.abspath(self.options.states_dir)
+            self.config['states_dirs'] = [states_dir]
+
         if self.options.local:
             self.config['file_client'] = 'local'
         if self.options.master:
@@ -36,15 +42,16 @@ class SaltCall(parsers.SaltCallOptionParser):
 
         # Setup file logging!
         self.setup_logfile_logger()
+        verify_log(self.config)
 
         caller = salt.cli.caller.Caller.factory(self.config)
 
         if self.options.doc:
             caller.print_docs()
-            self.exit(os.EX_OK)
+            self.exit(salt.defaults.exitcodes.EX_OK)
 
         if self.options.grains_run:
             caller.print_grains()
-            self.exit(os.EX_OK)
+            self.exit(salt.defaults.exitcodes.EX_OK)
 
         caller.run()

@@ -32,7 +32,7 @@ from __future__ import absolute_import
 import os
 import logging
 from salt.utils.decorators import depends
-import salt.ext.six as six
+from salt.ext import six
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,10 @@ def __virtual__():
     '''
     Load module only if cx_Oracle installed
     '''
-    return __virtualname__ if HAS_CX_ORACLE else False
+    if HAS_CX_ORACLE:
+        return __virtualname__
+    return (False, 'The oracle execution module not loaded: '
+            'python oracle library not found.')
 
 
 def _cx_oracle_req():

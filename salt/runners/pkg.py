@@ -2,7 +2,7 @@
 '''
 Package helper functions using ``salt.modules.pkg``
 
-.. versionadded:: FIXME
+.. versionadded:: 2015.8.0
 '''
 
 # Import python libs
@@ -13,7 +13,7 @@ import salt.output
 import salt.minion
 
 # Import 3rd-party libs
-import salt.ext.six as six
+from salt.ext import six
 
 
 def _get_returner(returner_types):
