@@ -9,23 +9,11 @@ Configuring the HTTP_JSON ext_pillar
 Set the following Salt config to setup http json result as external pillar source:
 
 .. code-block:: yaml
-
   ext_pillar:
     - http_json:
-        url: http://example.com/api/minion_id
-        ::TODO::
-        username: username
-        password: password
-
-If the with_grains parameter is set, grain keys wrapped in can be provided (wrapped
-in <> brackets) in the url in order to populate pillar data based on the grain value.
-
-.. code-block:: yaml
-
-  ext_pillar:
-    - http_json:
-        url: http://example.com/api/<nodename>
-        with_grains: True
+        url: http://example.com/api/%s
+        username: basic username
+        password: basic password
 
 Module Documentation
 ====================
@@ -39,6 +27,7 @@ import re
 # Import Salt libs
 try:
     from salt.ext.six.moves.urllib.parse import quote as _quote
+
     _HAS_DEPENDENCIES = True
 except ImportError:
     _HAS_DEPENDENCIES = False
@@ -54,34 +43,26 @@ def __virtual__():
 def ext_pillar(minion_id,
                pillar,  # pylint: disable=W0613
                url,
-               with_grains=False):
+               username=None,
+               password=None):
     '''
     Read pillar data from HTTP response.
 
     :param str url: Url to request.
-    :param bool with_grains: Whether to substitute strings in the url with their grain values.
-
+    :param str username: username for basic auth
+    :param str password: password for basic auth
     :return: A dictionary of the pillar data to add.
     :rtype: dict
     '''
-    grain_pattern = r'<(?P<grain_name>.*?)>'
 
-    if with_grains:
-        # Get the value of the grain and substitute each grain
-        # name for the url-encoded version of its grain value.
-        for match in re.finditer(grain_pattern, url):
-            grain_name = match.group('grain_name')
-            grain_value = __salt__['grains.get'](grain_name, None)
-
-            if not grain_value:
-                _LOG.error("Unable to get minion '%s' grain: %s", minion_id, grain_name)
-                return {}
-
-            grain_value = _quote(str(grain_value))
-            url = re.sub('<{0}>'.format(grain_name), grain_value, url)
+    url = url.replace('%s', _quote(minion_id))
 
     _LOG.debug('Getting url: %s', url)
-    data = __salt__['http.query'](url=url, decode=True, decode_type='json')
+
+    if username and password:
+        data = __salt__['http.query'](url=url, username=username, password=password, decode=True, decode_type='json')
+    else:
+        data = __salt__['http.query'](url=url, decode=True, decode_type='json')
 
     if 'dict' in data:
         return data['dict']
